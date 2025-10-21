@@ -1,6 +1,6 @@
 # FRC 1164 Attendance System
 
-![Logo](Executable%(Current)/assets/logo.png)
+![Logo](Executable%20(Current)/assets/logo.png)
 
 A lightweight, Windows-7-compatible attendance tracking system for **FRC Team 1164 Project NEO**.  
 Built with **Python + Tkinter**, this app provides a simple full-screen interface for team members to check in, while giving admins full control over attendance records, student management, and system settings.
