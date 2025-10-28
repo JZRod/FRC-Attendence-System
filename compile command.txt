@@ -1,0 +1,2 @@
+python -m PyInstaller --onefile --noconsole --icon=assets/icon.ico 1164-attendance-program.py  
+ This is the compile command
