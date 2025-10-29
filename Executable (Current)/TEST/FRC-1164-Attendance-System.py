@@ -27,7 +27,11 @@ except Exception:
 # ---------------- Config ----------------
 DATA_FOLDER = "data"
 ASSETS_FOLDER = "assets"
+<<<<<<< HEAD
 FILENAME = os.path.join(DATA_FOLDER, "attendance.csv")
+=======
+DEFAULT_FILENAME = os.path.join(DATA_FOLDER, "attendance.csv")
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 STUDENTS_FILE = os.path.join(DATA_FOLDER, "students.json")
 CONFIG_FILE = os.path.join(DATA_FOLDER, "config.json")
 LOGO_FILE = os.path.join(ASSETS_FOLDER, "logo.png")
@@ -37,20 +41,51 @@ ICON_FILE = os.path.join(ASSETS_FOLDER, "icon.ico")
 DEFAULT_CONFIG = {
     "admin_pin": "1234",
     "header_color": "#5D3FD3",
+<<<<<<< HEAD
     "logo_file": LOGO_FILE
+=======
+    "logo_file": LOGO_FILE,
+    "csv_file": DEFAULT_FILENAME
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 }
 
 HEADER_HEIGHT = 150
 
 # ---------------- Storage Helpers ----------------
+<<<<<<< HEAD
+=======
+def get_csv_file():
+    """Get the current CSV file path from config, with fallback to default"""
+    try:
+        config = load_config()
+        csv_path = config.get("csv_file", DEFAULT_FILENAME)
+        # Ensure the directory exists
+        csv_dir = os.path.dirname(csv_path)
+        if csv_dir and not os.path.exists(csv_dir):
+            os.makedirs(csv_dir, exist_ok=True)
+        return csv_path
+    except Exception:
+        return DEFAULT_FILENAME
+
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 def init_files():
     os.makedirs(DATA_FOLDER, exist_ok=True)
     os.makedirs(ASSETS_FOLDER, exist_ok=True)
 
+<<<<<<< HEAD
     # Ensure CSV header contains Member Status column
     if not os.path.exists(FILENAME):
         try:
             with open(FILENAME, "w", newline="", encoding="utf-8") as f:
+=======
+    # Get the current CSV file path
+    csv_file = get_csv_file()
+    
+    # Ensure CSV header contains Member Status column
+    if not os.path.exists(csv_file):
+        try:
+            with open(csv_file, "w", newline="", encoding="utf-8") as f:
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
                 writer = csv.writer(f)
                 writer.writerow(["Date", "Name", "Status", "Member Status"])
         except Exception as e:
@@ -73,7 +108,15 @@ def init_files():
 def load_config():
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+<<<<<<< HEAD
             return json.load(f)
+=======
+            config = json.load(f)
+            # Ensure csv_file is in config for backward compatibility
+            if "csv_file" not in config:
+                config["csv_file"] = DEFAULT_FILENAME
+            return config
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
     except Exception:
         return DEFAULT_CONFIG.copy()
 
@@ -103,8 +146,14 @@ def save_students(students):
         return False
 
 def already_checked_in(name, date_iso):
+<<<<<<< HEAD
     try:
         with open(FILENAME, "r", encoding="utf-8") as f:
+=======
+    csv_file = get_csv_file()
+    try:
+        with open(csv_file, "r", encoding="utf-8") as f:
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
             r = csv.DictReader(f)
             for row in r:
                 # row keys may be missing if the CSV is malformed; use get()
@@ -118,10 +167,18 @@ def already_checked_in(name, date_iso):
     return False
 
 def remove_attendance(name, date_iso):
+<<<<<<< HEAD
     updated_rows = []
     removed = False
     try:
         with open(FILENAME, "r", encoding="utf-8") as f:
+=======
+    csv_file = get_csv_file()
+    updated_rows = []
+    removed = False
+    try:
+        with open(csv_file, "r", encoding="utf-8") as f:
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
             reader = csv.DictReader(f)
             for row in reader:
                 if (row.get("Date") == date_iso and row.get("Name") == name and
@@ -130,7 +187,11 @@ def remove_attendance(name, date_iso):
                     continue
                 updated_rows.append(row)
         # Write header and rows back
+<<<<<<< HEAD
         with open(FILENAME, "w", newline="", encoding="utf-8") as f:
+=======
+        with open(csv_file, "w", newline="", encoding="utf-8") as f:
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
             fieldnames = ["Date", "Name", "Status", "Member Status"]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -146,11 +207,16 @@ def remove_attendance(name, date_iso):
     return removed
 
 def mark_attendance(name, status="Present", member_status="Member"):
+<<<<<<< HEAD
+=======
+    csv_file = get_csv_file()
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
     today = datetime.date.today().isoformat()
     # Toggle behavior: if already present, remove them and report removed
     if status == "Present" and already_checked_in(name, today):
         removed = remove_attendance(name, today)
         if removed:
+<<<<<<< HEAD
             return False, f"{name} removed from today's attendance."
         else:
             return False, f"{name} is already marked Present today."
@@ -163,12 +229,30 @@ def mark_attendance(name, status="Present", member_status="Member"):
     except Exception as e:
         print("mark_attendance error:", e)
         return False, f"Failed to mark attendance: {e}"
+=======
+            return False, "{0} removed from today's attendance.".format(name)
+        else:
+            return False, "{0} is already marked Present today.".format(name)
+    # Append row with Member Status
+    try:
+        with open(csv_file, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([today, name, status, member_status])
+        return True, "Welcome, {0}! You're marked {1}.".format(name, status)
+    except Exception as e:
+        print("mark_attendance error:", e)
+        return False, "Failed to mark attendance: {0}".format(e)
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
 # ---------------- GUI App ----------------
 class AttendanceApp:
     def __init__(self, root):
         self.root = root
+<<<<<<< HEAD
         self.root.title("Attendance System - Windows 7 Compatible")
+=======
+        self.root.title("FRC Attendance System")
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
         self.root.configure(bg="black")
 
         # Load configuration
@@ -176,6 +260,10 @@ class AttendanceApp:
         self.admin_pin = self.config.get("admin_pin", "1164")
         self.header_color = self.config.get("header_color", "#5D3FD3")
         self.logo_file = self.config.get("logo_file", LOGO_FILE)
+<<<<<<< HEAD
+=======
+        self.csv_file = self.config.get("csv_file", DEFAULT_FILENAME)
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
         # Fullscreen toggle
         self.fullscreen = True
@@ -288,7 +376,13 @@ class AttendanceApp:
                 self.root.state('zoomed')
             except tk.TclError:
                 # Final fallback - maximize window manually
+<<<<<<< HEAD
                 self.root.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
+=======
+                screen_width = self.root.winfo_screenwidth()
+                screen_height = self.root.winfo_screenheight()
+                self.root.geometry("{0}x{1}+0+0".format(screen_width, screen_height))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
     def setup_logo(self):
         """Setup logo with PIL fallback for Windows 7"""
@@ -306,7 +400,11 @@ class AttendanceApp:
             else:
                 raise Exception("Logo not available")
         except Exception as e:
+<<<<<<< HEAD
             print(f"Logo loading failed: {e}")
+=======
+            print("Logo loading failed: {0}".format(e))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
             logo_label = tk.Label(self.header, text="LOGO", bg=self.header_color, fg="white",
                                   font=("Arial", 24, "bold"), relief="raised", bd=2)
             logo_label.grid(row=0, column=0, padx=12, sticky="ns")
@@ -331,7 +429,11 @@ class AttendanceApp:
             else:
                 raise Exception("Gear icon not available")
         except Exception as e:
+<<<<<<< HEAD
             print(f"Gear icon loading failed: {e}")
+=======
+            print("Gear icon loading failed: {0}".format(e))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
             self.admin_btn = tk.Button(self.header, text="⚙ Admin", command=self.admin_panel,
                                        bg=self.header_color, fg="white",
                                        font=("Arial", 14, "bold"), borderwidth=2,
@@ -358,7 +460,13 @@ class AttendanceApp:
                     self.root.state('normal')
             except tk.TclError:
                 if self.fullscreen:
+<<<<<<< HEAD
                     self.root.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
+=======
+                    screen_width = self.root.winfo_screenwidth()
+                    screen_height = self.root.winfo_screenheight()
+                    self.root.geometry("{0}x{1}+0+0".format(screen_width, screen_height))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
                 else:
                     self.root.geometry("1024x768+100+100")
 
@@ -418,7 +526,11 @@ class AttendanceApp:
 
         for name in sorted_students:
             checked = already_checked_in(name, today)
+<<<<<<< HEAD
             text = f"🙋 {name}" + (" ✅" if checked else "")
+=======
+            text = "🙋 {0}".format(name) + (" ✅" if checked else "")
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
             btn = tk.Button(self.student_frame, text=text, width=20, height=btn_height,
                             command=lambda n=name: self.checkin(n),
                             bg="#444" if checked else "#333", fg="white",
@@ -502,8 +614,14 @@ class AttendanceApp:
         tree_frame.grid_columnconfigure(0, weight=1)
 
         # Load attendance data
+<<<<<<< HEAD
         try:
             with open(FILENAME, "r", encoding="utf-8") as f:
+=======
+        csv_file = get_csv_file()
+        try:
+            with open(csv_file, "r", encoding="utf-8") as f:
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
                 r = csv.DictReader(f)
                 for row in r:
                     tree.insert("", "end", values=(
@@ -590,11 +708,35 @@ class AttendanceApp:
                   bg="blue", fg="white", font=("Arial", 11, "bold"),
                   relief="raised", bd=2).pack(pady=5)
 
+<<<<<<< HEAD
+=======
+        # CSV File Location Section
+        csv_frame = tk.LabelFrame(main_container, text="CSV File Location", bg="white",
+                                 font=("Arial", 12, "bold"), fg="navy")
+        csv_frame.pack(fill="x", pady=(0, 20))
+
+        current_csv_label = tk.Label(csv_frame, text="Current CSV: {0}".format(os.path.basename(self.csv_file)),
+                                     bg="white", fg="black", font=("Arial", 11))
+        current_csv_label.pack(pady=10)
+        
+        csv_path_label = tk.Label(csv_frame, text="Path: {0}".format(self.csv_file),
+                                 bg="white", fg="gray", font=("Arial", 9))
+        csv_path_label.pack(pady=(0, 10))
+        
+        tk.Button(csv_frame, text="📂 Change CSV Location", command=self.change_csv_location,
+                  bg="blue", fg="white", font=("Arial", 11, "bold"),
+                  relief="raised", bd=2).pack(pady=5)
+
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
         logo_frame = tk.LabelFrame(main_container, text="Logo Settings", bg="white",
                                   font=("Arial", 12, "bold"), fg="navy")
         logo_frame.pack(fill="x", pady=(0, 20))
 
+<<<<<<< HEAD
         tk.Label(logo_frame, text=f"Current logo: {os.path.basename(self.logo_file)}",
+=======
+        tk.Label(logo_frame, text="Current logo: {0}".format(os.path.basename(self.logo_file)),
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
                  bg="white", fg="black", font=("Arial", 11)).pack(pady=10)
         tk.Button(logo_frame, text="🖼 Choose Logo", command=self.change_logo,
                   bg="blue", fg="white", font=("Arial", 11, "bold"),
@@ -648,17 +790,30 @@ class AttendanceApp:
 • View and download attendance records as CSV
 • Add, edit, or remove students from the system
 • Change admin PIN for security
+<<<<<<< HEAD
+=======
+• Customize CSV file location and name
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 • Customize logo and header colors
 • Access help and system information
 
 📁 File Locations:
+<<<<<<< HEAD
 • Attendance data: data/attendance.csv
+=======
+• Attendance data: Configurable (default: data/attendance.csv)
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 • Student list: data/students.json
 • Configuration: data/config.json
 • Assets: assets/ folder
 
+<<<<<<< HEAD
 🔧 Windows 7 Compatibility:
 • Works with Python 3.7/3.8
+=======
+🔧 Windows 7 & Python 3.8 Compatibility:
+• Works with Python 3.8.0 and newer
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 • Fallback modes for image loading
 • Compatible with older tkinter versions
 • Handles encoding issues gracefully
@@ -701,8 +856,14 @@ class AttendanceApp:
     def refresh_attendance_tree(self, tree):
         for item in tree.get_children():
             tree.delete(item)
+<<<<<<< HEAD
         try:
             with open(FILENAME, "r", encoding="utf-8") as f:
+=======
+        csv_file = get_csv_file()
+        try:
+            with open(csv_file, "r", encoding="utf-8") as f:
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
                 r = csv.DictReader(f)
                 for row in r:
                     tree.insert("", "end", values=(
@@ -730,11 +891,19 @@ class AttendanceApp:
                 if ok:
                     self.refresh_students_listbox()
                     self.build_student_buttons()
+<<<<<<< HEAD
                     messagebox.showinfo("Success", f"Student '{name}' added successfully!")
                 else:
                     messagebox.showerror("Error", "Failed to save student data")
             else:
                 messagebox.showwarning("Warning", f"Student '{name}' already exists!")
+=======
+                    messagebox.showinfo("Success", "Student '{0}' added successfully!".format(name))
+                else:
+                    messagebox.showerror("Error", "Failed to save student data")
+            else:
+                messagebox.showwarning("Warning", "Student '{0}' already exists!".format(name))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
     def edit_student(self):
         try:
@@ -744,7 +913,11 @@ class AttendanceApp:
                 return
 
             old_name = self.students[selection[0]]
+<<<<<<< HEAD
             new_name = simpledialog.askstring("Edit Student", f"Edit name:", initialvalue=old_name)
+=======
+            new_name = simpledialog.askstring("Edit Student", "Edit name:", initialvalue=old_name)
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
             if new_name and new_name.strip() and new_name.strip() != old_name:
                 new_name = new_name.strip()
@@ -754,11 +927,19 @@ class AttendanceApp:
                     if ok:
                         self.refresh_students_listbox()
                         self.build_student_buttons()
+<<<<<<< HEAD
                         messagebox.showinfo("Success", f"Student renamed to '{new_name}'!")
                     else:
                         messagebox.showerror("Error", "Failed to save student data")
                 else:
                     messagebox.showwarning("Warning", f"Student '{new_name}' already exists!")
+=======
+                        messagebox.showinfo("Success", "Student renamed to '{0}'!".format(new_name))
+                    else:
+                        messagebox.showerror("Error", "Failed to save student data")
+                else:
+                    messagebox.showwarning("Warning", "Student '{0}' already exists!".format(new_name))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
         except IndexError:
             messagebox.showerror("Error", "Invalid selection")
 
@@ -770,13 +951,21 @@ class AttendanceApp:
                 return
 
             name = self.students[selection[0]]
+<<<<<<< HEAD
             if messagebox.askyesno("Confirm Delete", f"Delete student '{name}'?\nThis cannot be undone."):
+=======
+            if messagebox.askyesno("Confirm Delete", "Delete student '{0}'?\nThis cannot be undone.".format(name)):
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
                 self.students.pop(selection[0])
                 ok = save_students(self.students)
                 if ok:
                     self.refresh_students_listbox()
                     self.build_student_buttons()
+<<<<<<< HEAD
                     messagebox.showinfo("Success", f"Student '{name}' deleted!")
+=======
+                    messagebox.showinfo("Success", "Student '{0}' deleted!".format(name))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
                 else:
                     messagebox.showerror("Error", "Failed to save student data")
         except IndexError:
@@ -786,6 +975,7 @@ class AttendanceApp:
         try:
             webbrowser.open("https://github.com/JZRod/FRC-Attendence-System")
         except Exception as e:
+<<<<<<< HEAD
             messagebox.showerror("Error", f"Could not open browser: {e}")
 
     def show_system_info(self):
@@ -807,10 +997,51 @@ Attendance File: {FILENAME}
 Students File: {STUDENTS_FILE}
 Config File: {CONFIG_FILE}
 """
+=======
+            messagebox.showerror("Error", "Could not open browser: {0}".format(e))
+
+    def show_system_info(self):
+        info = """System Information:
+
+Python Version: {0}
+Platform: {1}
+PIL Available: {2}
+Current Directory: {3}
+
+Configuration:
+Admin PIN: {4}
+Header Color: {5}
+Logo File: {6}
+CSV File: {7}
+
+Data Files:
+Students: {8} registered
+Attendance File: {9}
+Students File: {10}
+Config File: {11}
+""".format(
+            sys.version,
+            sys.platform,
+            PIL_AVAILABLE,
+            os.getcwd(),
+            '*' * len(self.admin_pin),
+            self.header_color,
+            self.logo_file,
+            self.csv_file,
+            len(self.students),
+            get_csv_file(),
+            STUDENTS_FILE,
+            CONFIG_FILE
+        )
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
         messagebox.showinfo("System Information", info)
 
     # ---------------- Admin helper functions ----------------
     def download_csv(self):
+<<<<<<< HEAD
+=======
+        csv_file = get_csv_file()
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
         try:
             file_path = filedialog.asksaveasfilename(
                 defaultextension=".csv",
@@ -819,10 +1050,17 @@ Config File: {CONFIG_FILE}
             )
             if file_path:
                 import shutil
+<<<<<<< HEAD
                 shutil.copy2(FILENAME, file_path)
                 messagebox.showinfo("Success", f"CSV saved to:\n{file_path}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save CSV: {e}")
+=======
+                shutil.copy2(csv_file, file_path)
+                messagebox.showinfo("Success", "CSV saved to:\n{0}".format(file_path))
+        except Exception as e:
+            messagebox.showerror("Error", "Failed to save CSV: {0}".format(e))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
     def change_admin_pin(self):
         new_pin = simpledialog.askstring("Change PIN", "Enter new admin PIN:", show="*")
@@ -838,6 +1076,78 @@ Config File: {CONFIG_FILE}
             else:
                 messagebox.showerror("Error", "PINs do not match!")
 
+<<<<<<< HEAD
+=======
+    def change_csv_location(self):
+        """Allow user to change the CSV file location and name"""
+        # Ask user to select or create a new CSV file location
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Choose CSV File Location and Name",
+            initialfile=os.path.basename(self.csv_file),
+            initialdir=os.path.dirname(self.csv_file)
+        )
+        
+        if not file_path:
+            return  # User cancelled
+        
+        # Validate the path
+        try:
+            # Check if we can write to the directory
+            csv_dir = os.path.dirname(file_path)
+            if csv_dir and not os.path.exists(csv_dir):
+                try:
+                    os.makedirs(csv_dir, exist_ok=True)
+                except Exception as e:
+                    messagebox.showerror("Error", "Cannot create directory:\n{0}".format(e))
+                    return
+            
+            # Check if file exists and ask about copying data
+            old_csv = self.csv_file
+            if os.path.exists(old_csv) and not os.path.exists(file_path):
+                if messagebox.askyesno("Copy Existing Data?", 
+                                      "Would you like to copy existing attendance data to the new file?"):
+                    try:
+                        import shutil
+                        shutil.copy2(old_csv, file_path)
+                    except Exception as e:
+                        messagebox.showerror("Error", "Failed to copy data:\n{0}".format(e))
+                        return
+            
+            # If file doesn't exist and user didn't copy, create a new one with headers
+            if not os.path.exists(file_path):
+                try:
+                    with open(file_path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["Date", "Name", "Status", "Member Status"])
+                except Exception as e:
+                    messagebox.showerror("Error", "Cannot create CSV file:\n{0}".format(e))
+                    return
+            
+            # Test if we can write to the file
+            try:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    pass
+            except Exception as e:
+                messagebox.showerror("Error", "Cannot write to file:\n{0}".format(e))
+                return
+            
+            # Update configuration
+            self.config["csv_file"] = file_path
+            self.csv_file = file_path
+            if save_config(self.config):
+                messagebox.showinfo("Success", 
+                                   "CSV file location changed successfully!\n\nNew location:\n{0}".format(file_path))
+                # Refresh the attendance view if open
+                self.build_student_buttons()
+            else:
+                messagebox.showerror("Error", "Failed to save configuration")
+                
+        except Exception as e:
+            messagebox.showerror("Error", "Failed to change CSV location:\n{0}".format(e))
+
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
     def change_logo(self):
         if not PIL_AVAILABLE:
             messagebox.showerror("Error", "Image support not available (PIL/Pillow not installed)")
@@ -864,7 +1174,11 @@ Config File: {CONFIG_FILE}
                 else:
                     messagebox.showerror("Error", "Failed to save configuration")
             except Exception as e:
+<<<<<<< HEAD
                 messagebox.showerror("Error", f"Invalid image file: {e}")
+=======
+                messagebox.showerror("Error", "Invalid image file: {0}".format(e))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
     def change_header_color(self):
         try:
@@ -882,7 +1196,11 @@ Config File: {CONFIG_FILE}
                 else:
                     messagebox.showerror("Error", "Failed to save configuration")
         except Exception as e:
+<<<<<<< HEAD
             messagebox.showerror("Error", f"Failed to change color: {e}")
+=======
+            messagebox.showerror("Error", "Failed to change color: {0}".format(e))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
 # ---------------- Main Application ----------------
 def main():
@@ -897,7 +1215,11 @@ def main():
             except Exception:
                 pass
     except Exception as e:
+<<<<<<< HEAD
         print(f"Window setup warning: {e}")
+=======
+        print("Window setup warning: {0}".format(e))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 
     app = AttendanceApp(root)
     try:
@@ -905,9 +1227,15 @@ def main():
     except KeyboardInterrupt:
         print("Application terminated by user")
     except Exception as e:
+<<<<<<< HEAD
         print(f"Application error: {e}")
         try:
             messagebox.showerror("Application Error", f"An error occurred: {e}")
+=======
+        print("Application error: {0}".format(e))
+        try:
+            messagebox.showerror("Application Error", "An error occurred: {0}".format(e))
+>>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
         except:
             print("Could not display error message")
 
