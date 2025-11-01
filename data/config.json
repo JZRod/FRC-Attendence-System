@@ -1,5 +1,8 @@
 {
   "admin_pin": "1234",
   "header_color": "#5D3FD3",
-  "logo_file": "D:/Python Project/NEW/FRC-Attendence-System/Executable (Current)/TEST/assets/logo.png"
+  "logo_file": "D:/Python Project/NEW/FRC-Attendence-System/Executable (Current)/TEST/assets/logo.png",
+  "csv_file": "D:/Python Project/NEW/FRC-Attendence-System/Executable (Current)/data/attendance.csv",
+  "students_file": "D:/Python Project/NEW/FRC-Attendence-System/data/students.json",
+  "guests_file": "D:/Python Project/NEW/FRC-Attendence-System/Executable (Current)/data/guests.csv"
 }

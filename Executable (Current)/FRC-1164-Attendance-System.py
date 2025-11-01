@@ -33,6 +33,7 @@ CONFIG_FILE = os.path.join(DATA_FOLDER, "config.json")
 LOGO_FILE = os.path.join(ASSETS_FOLDER, "logo.png")
 GEAR_FILE = os.path.join(ASSETS_FOLDER, "gear.png")
 ICON_FILE = os.path.join(ASSETS_FOLDER, "icon.ico")
+GUESTS_FILE = os.path.join(DATA_FOLDER, "guests.csv")
 
 DEFAULT_CONFIG = {
     "admin_pin": "1234",
@@ -59,25 +60,103 @@ def get_csv_file():
     except Exception:
         return DEFAULT_FILENAME
 
+
+def get_students_file():
+    """Get current students.json path from config with fallback"""
+    try:
+        config = load_config()
+        path = config.get("students_file", STUDENTS_FILE)
+        dirn = os.path.dirname(path)
+        if dirn and not os.path.exists(dirn):
+            os.makedirs(dirn, exist_ok=True)
+        return path
+    except Exception:
+        return STUDENTS_FILE
+
+
+def get_guests_file():
+    """Get current guests.csv path from config with fallback"""
+    try:
+        config = load_config()
+        path = config.get("guests_file", GUESTS_FILE)
+        dirn = os.path.dirname(path)
+        if dirn and not os.path.exists(dirn):
+            os.makedirs(dirn, exist_ok=True)
+        return path
+    except Exception:
+        return GUESTS_FILE
+
 def init_files():
     os.makedirs(DATA_FOLDER, exist_ok=True)
     os.makedirs(ASSETS_FOLDER, exist_ok=True)
 
+    # --- Migration: if user has students/guests in Documents, copy into data/ and update config ---
+    try:
+        cfg = load_config()
+        user_home = os.path.expanduser("~")
+        docs_path = os.path.join(user_home, "Documents")
+
+        def _should_migrate(path):
+            try:
+                if not path:
+                    return False
+                ap = os.path.abspath(path)
+                return os.path.exists(ap) and os.path.commonpath([ap, os.path.abspath(docs_path)]) == os.path.abspath(docs_path)
+            except Exception:
+                return False
+
+        migrated = False
+        # Students
+        students_cfg = cfg.get("students_file")
+        if _should_migrate(students_cfg):
+            try:
+                dest = STUDENTS_FILE
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                import shutil
+                shutil.copy2(os.path.abspath(students_cfg), dest)
+                cfg["students_file"] = dest
+                migrated = True
+            except Exception:
+                pass
+
+        # Guests
+        guests_cfg = cfg.get("guests_file")
+        if _should_migrate(guests_cfg):
+            try:
+                dest = GUESTS_FILE
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                import shutil
+                shutil.copy2(os.path.abspath(guests_cfg), dest)
+                cfg["guests_file"] = dest
+                migrated = True
+            except Exception:
+                pass
+
+        if migrated:
+            try:
+                save_config(cfg)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # Get the current CSV file path
     csv_file = get_csv_file()
     
-    # Ensure CSV header contains Member Status column
+    # Ensure CSV header contains Status column
     if not os.path.exists(csv_file):
         try:
             with open(csv_file, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(["Date", "Name", "Status", "Member Status"])
+                writer.writerow(["Date", "Name", "Status"])
         except Exception as e:
             print("Could not create attendance CSV:", e)
 
-    if not os.path.exists(STUDENTS_FILE):
+    students_file = get_students_file()
+    if not os.path.exists(students_file):
         try:
-            with open(STUDENTS_FILE, "w", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(students_file), exist_ok=True) if os.path.dirname(students_file) else None
+            with open(students_file, "w", encoding="utf-8") as f:
                 json.dump(["placeholder1", "placeholder2", "placeholder3", "placeholder4"], f, indent=2)
         except Exception as e:
             print("Could not create students.json:", e)
@@ -88,6 +167,16 @@ def init_files():
                 json.dump(DEFAULT_CONFIG, f, indent=2)
         except Exception as e:
             print("Could not create config.json:", e)
+    # Ensure guests CSV exists
+    guests_file = get_guests_file()
+    if not os.path.exists(guests_file):
+        try:
+            os.makedirs(os.path.dirname(guests_file), exist_ok=True) if os.path.dirname(guests_file) else None
+            with open(guests_file, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Date", "Name", "Email"])
+        except Exception as e:
+            print("Could not create guests CSV:", e)
 
 def load_config():
     try:
@@ -111,14 +200,17 @@ def save_config(config):
 
 def load_students():
     try:
-        with open(STUDENTS_FILE, "r", encoding="utf-8") as f:
+        sf = get_students_file()
+        with open(sf, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return []
 
 def save_students(students):
     try:
-        with open(STUDENTS_FILE, "w", encoding="utf-8") as f:
+        sf = get_students_file()
+        os.makedirs(os.path.dirname(sf), exist_ok=True) if os.path.dirname(sf) else None
+        with open(sf, "w", encoding="utf-8") as f:
             json.dump(students, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -164,7 +256,7 @@ def remove_attendance(name, date_iso):
                     continue
                 updated_rows.append(row)
         with open(csv_file, "w", newline="", encoding="utf-8") as f:
-            fieldnames = ["Date", "Name", "Status", "Member Status"]
+            fieldnames = ["Date", "Name", "Status"]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for r in updated_rows:
@@ -210,9 +302,10 @@ def append_new_day_section(date_iso):
     try:
         # Ensure file exists with header
         if not os.path.exists(csv_file):
+            os.makedirs(os.path.dirname(csv_file), exist_ok=True) if os.path.dirname(csv_file) else None
             with open(csv_file, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(["Date", "Name", "Status", "Member Status"])
+                writer.writerow(["Date", "Name", "Status"])
 
         # Only append the marker if the last recorded date isn't already this date
         last = get_last_recorded_date()
@@ -221,13 +314,13 @@ def append_new_day_section(date_iso):
 
         with open(csv_file, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([date_iso, "--- NEW DAY ---", "", ""])
+            writer.writerow([date_iso, "--- NEW DAY ---", ""])
         return True
     except Exception as e:
         print("append_new_day_section error:", e)
         return False
 
-def mark_attendance(name, status="Present", member_status="Member"):
+def mark_attendance(name, status="Present"):
     """
     Mark attendance for TODAY only. Each day's attendance is completely independent.
     - Uses today's date (datetime.date.today().isoformat()) 
@@ -253,7 +346,7 @@ def mark_attendance(name, status="Present", member_status="Member"):
     try:
         with open(csv_file, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([today, name, status, member_status])
+            writer.writerow([today, name, status])
         return True, "Welcome, {0}! You're marked {1}.".format(name, status)
     except Exception as e:
         print("mark_attendance error:", e)
@@ -397,7 +490,18 @@ class AttendanceApp:
         def _on_mousewheel(event):
             self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Bind mousewheel only to the main canvas and its internal frame so that
+        # other windows (like the Admin panel) can handle scrolling independently.
+        # Previously bind_all caused the admin window mousewheel to scroll the main app.
+        try:
+            self.canvas.bind("<MouseWheel>", _on_mousewheel)
+            self.student_frame.bind("<MouseWheel>", _on_mousewheel)
+        except Exception:
+            # Fallback to the old behavior only if necessary
+            try:
+                self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            except Exception:
+                pass
 
         # Load students
         self.students = load_students()
@@ -414,7 +518,7 @@ class AttendanceApp:
         """Update the title label to include the current date for clarity."""
         try:
             d = self.current_date or datetime.date.today().isoformat()
-            self.title_label.configure(text=("Tap Your Name to Check In  —  {0}".format(d)))
+            self.title_label.configure(text=("Tap Your Name to Check In"))
         except Exception:
             pass
 
@@ -634,15 +738,67 @@ class AttendanceApp:
 
     def checkin(self, name):
         """Handle student check-in (toggle) without popups"""
-        mark_attendance(name, "Present", "Member")
+        # Toggle attendance for the given student name
+        mark_attendance(name, "Present")
         self.build_student_buttons()
 
     def guest_sign_in(self):
         """Handle guest sign-in (no popups)"""
         name = simpledialog.askstring("Guest Sign In", "Enter your name:")
-        if name and name.strip():
-            mark_attendance(name.strip(), "Present", "Visitor")
-            self.build_student_buttons()
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        email = simpledialog.askstring("Guest Email (optional)", "Enter email (optional):")
+        email = (email.strip() if email and email.strip() else "")
+
+        # Append to guests CSV
+        try:
+            guests_file = get_guests_file()
+            os.makedirs(os.path.dirname(guests_file), exist_ok=True) if os.path.dirname(guests_file) else None
+            today = datetime.date.today().isoformat()
+            with open(guests_file, "a", newline="", encoding="utf-8") as gf:
+                gw = csv.writer(gf)
+                gw.writerow([today, name, email])
+        except Exception as e:
+            print("Failed to record guest:", e)
+
+        # Optionally add to students list so they can be checked in easily next time
+        # Update in-memory student list and persist.
+        if name not in self.students:
+            self.students.append(name)
+            try:
+                save_students(self.students)
+            except Exception as e:
+                print("Failed to save new student to students.json:", e)
+
+            # If the admin Students tab/listbox exists, refresh it (safe check).
+            try:
+                if hasattr(self, 'students_listbox') and self.students_listbox:
+                    self.refresh_students_listbox()
+            except Exception:
+                # Non-fatal; continue to update the main view below
+                pass
+
+            # Reapply the current search filter so the new student appears in the buttons.
+            try:
+                self.on_search_change()
+            except Exception:
+                # fallback to showing all students
+                self.filtered_students = self.students.copy()
+
+            # Ensure the new student is present in the filtered list so the button will be built
+            if name not in self.filtered_students:
+                # Put the new student near the front so it's visible immediately
+                try:
+                    self.filtered_students.insert(0, name)
+                except Exception:
+                    # Last-resort: replace filtered list with full students list
+                    self.filtered_students = self.students.copy()
+
+        # Mark attendance in main CSV and refresh buttons
+        mark_attendance(name, "Present")
+        # Rebuild buttons (uses filtered_students which was updated above)
+        self.build_student_buttons()
 
     # ---------------- Admin Panel ----------------
     def admin_panel(self):
@@ -666,21 +822,39 @@ class AttendanceApp:
 
         # Tabs
         self.setup_attendance_tab(notebook)
+        # Guests admin tab (shows guest sign-ins)
+        self.setup_guests_tab(notebook)
         self.setup_students_tab(notebook)
         self.setup_settings_tab(notebook)
         self.setup_help_tab(notebook)
 
     def setup_attendance_tab(self, notebook):
-        frame = tk.Frame(notebook, bg="white")
+        # Use a dark background for the attendance viewer
+        frame = tk.Frame(notebook, bg="black")
         notebook.add(frame, text="Attendance")
         admin_window = notebook.master
 
-        # Treeview + scrollbars
-        tree_frame = tk.Frame(frame, bg="white")
+        # Treeview + scrollbars (container uses black to match request)
+        tree_frame = tk.Frame(frame, bg="black")
         tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        cols = ("Date", "Name", "Status", "Member Status")
-        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=15)
+        # Configure a Treeview style for dark background rows/fields
+        try:
+            style = ttk.Style()
+            try:
+                style.theme_use('default')
+            except Exception:
+                pass
+            style.configure("Black.Treeview", background="black", fieldbackground="black", foreground="white")
+            style.configure("Black.Treeview.Heading", background=self.header_color, foreground="white")
+            style.map("Black.Treeview", background=[('selected', self.header_color)], foreground=[('selected', 'white')])
+        except Exception:
+            # If style setup fails, continue with defaults
+            pass
+
+        cols = ("Date", "Name", "Status")
+        # Apply the dark style if available
+        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=15, style="Black.Treeview")
         for col in cols:
             tree.heading(col, text=col)
             tree.column(col, width=150, anchor="center")
@@ -705,14 +879,13 @@ class AttendanceApp:
                     tree.insert("", "end", values=(
                         row.get("Date", ""),
                         row.get("Name", ""),
-                        row.get("Status", ""),
-                        row.get("Member Status", "")
+                        row.get("Status", "")
                     ))
         except Exception as e:
             print("Error loading attendance data:", e)
-            tree.insert("", "end", values=("Error", "Could not load data", "Check file", "Error"))
+            tree.insert("", "end", values=("Error", "Could not load data", "Check file"))
 
-        btn_frame = tk.Frame(frame, bg="white")
+        btn_frame = tk.Frame(frame, bg="black")
         btn_frame.pack(pady=10, fill="x", padx=10)
 
         tk.Button(btn_frame, text="Download CSV", command=self.download_csv,
@@ -727,22 +900,102 @@ class AttendanceApp:
                   bg="red", fg="white", font=("Arial", 12, "bold"),
                   relief="raised", bd=2).pack(side="right", padx=5)
 
+    def setup_guests_tab(self, notebook):
+        """Admin tab to view guest sign-ins (Date, Name, Email)"""
+        frame = tk.Frame(notebook, bg="black")
+        notebook.add(frame, text="Guests")
+        admin_window = notebook.master
+
+        tree_frame = tk.Frame(frame, bg="black")
+        tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        try:
+            style = ttk.Style()
+            try:
+                style.theme_use('default')
+            except Exception:
+                pass
+            style.configure("Black.Treeview", background="black", fieldbackground="black", foreground="white")
+            style.configure("Black.Treeview.Heading", background=self.header_color, foreground="white")
+            style.map("Black.Treeview", background=[('selected', self.header_color)], foreground=[('selected', 'white')])
+        except Exception:
+            pass
+
+        cols = ("Date", "Name", "Email")
+        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=15, style="Black.Treeview")
+        for col in cols:
+            tree.heading(col, text=col)
+            tree.column(col, width=150, anchor="center")
+
+        v_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        h_scrollbar = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+
+        tree.grid(row=0, column=0, sticky="nsew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        # Load guest data
+        try:
+            self.refresh_guests_tree(tree)
+        except Exception as e:
+            print("Error loading guests data:", e)
+            tree.insert("", "end", values=("Error", "Could not load data", "Check file"))
+
+        btn_frame = tk.Frame(frame, bg="black")
+        btn_frame.pack(pady=10, fill="x", padx=10)
+
+        def download_guests():
+            guests_file = get_guests_file()
+            try:
+                file_path = filedialog.asksaveasfilename(
+                    defaultextension=".csv",
+                    filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                    title="Save Guests CSV"
+                )
+                if file_path:
+                    import shutil
+                    shutil.copy2(guests_file, file_path)
+                    messagebox.showinfo("Success", "Guests CSV saved to:\n{0}".format(file_path))
+            except Exception as e:
+                messagebox.showerror("Error", "Failed to save Guests CSV: {0}".format(e))
+
+        tk.Button(btn_frame, text="Download CSV", command=download_guests,
+                  bg="green", fg="white", font=("Arial", 12, "bold"),
+                  relief="raised", bd=2).pack(side="left", padx=5)
+
+        tk.Button(btn_frame, text="Refresh", command=lambda: self.refresh_guests_tree(tree),
+                  bg="blue", fg="white", font=("Arial", 12, "bold"),
+                  relief="raised", bd=2).pack(side="left", padx=5)
+
+        tk.Button(btn_frame, text="Close", command=lambda: admin_window.destroy(),
+                  bg="red", fg="white", font=("Arial", 12, "bold"),
+                  relief="raised", bd=2).pack(side="right", padx=5)
+
     def setup_students_tab(self, notebook):
-        frame = tk.Frame(notebook, bg="white")
+        frame = tk.Frame(notebook, bg="black")
         notebook.add(frame, text="Students")
         admin_window = notebook.master
 
-        list_frame = tk.Frame(frame, bg="white")
+        list_frame = tk.Frame(frame, bg="black")
         list_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        tk.Label(list_frame, text="Current Students:", bg="white", fg="black",
+        tk.Label(list_frame, text="Current Students:", bg="black", fg="white",
                  font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 5))
 
-        list_container = tk.Frame(list_frame, bg="white")
+        list_container = tk.Frame(list_frame, bg="black")
         list_container.pack(fill="both", expand=True)
 
+        # Dark-themed listbox so the Students admin tab matches the Attendance viewer
         self.students_listbox = tk.Listbox(list_container, font=("Arial", 12),
-                                          selectmode=tk.SINGLE, height=15)
+                                          selectmode=tk.SINGLE, height=15,
+                                          bg="black", fg="white",
+                                          selectbackground=self.header_color,
+                                          selectforeground="white",
+                                          highlightthickness=0, bd=0)
         list_scrollbar = ttk.Scrollbar(list_container, orient="vertical",
                                        command=self.students_listbox.yview)
         self.students_listbox.configure(yscrollcommand=list_scrollbar.set)
@@ -752,7 +1005,7 @@ class AttendanceApp:
 
         self.refresh_students_listbox()
 
-        btn_frame = tk.Frame(frame, bg="white")
+        btn_frame = tk.Frame(frame, bg="black")
         btn_frame.pack(pady=10, fill="x", padx=10)
 
         tk.Button(btn_frame, text="Add Student", command=self.add_student,
@@ -769,89 +1022,161 @@ class AttendanceApp:
                   relief="raised", bd=2).pack(side="right", padx=5)
 
     def setup_settings_tab(self, notebook):
-        settings_frame = tk.Frame(notebook, bg="black")
-        notebook.add(settings_frame, text="Settings")
-        admin_window = notebook.master
+       settings_frame = tk.Frame(notebook, bg="black")
+       notebook.add(settings_frame, text="Settings")
+       admin_window = notebook.master
 
-        main_container = tk.Frame(settings_frame, bg="black")
-        main_container.pack(fill="both", expand=True, padx=20, pady=20)
+       # Scrollable settings area: canvas + inner frame so long settings pages can scroll
+       container_canvas = tk.Canvas(settings_frame, bg="black", highlightthickness=0)
+       vsb = ttk.Scrollbar(settings_frame, orient="vertical", command=container_canvas.yview)
+       container_canvas.configure(yscrollcommand=vsb.set)
+       vsb.pack(side="right", fill="y")
+       container_canvas.pack(side="left", fill="both", expand=True, padx=0, pady=0)
 
-        pin_frame = tk.LabelFrame(main_container, text="Admin PIN", bg="black",
-                                 font=("Arial", 12, "bold"), fg="#5D3FD3")
-        pin_frame.pack(fill="x", pady=(0, 20))
+       inner_frame = tk.Frame(container_canvas, bg="black")
+       # create window to hold inner_frame with a small left padding
+       left_pad = 10
+       win_id = container_canvas.create_window((left_pad, 0), window=inner_frame, anchor="nw")
 
-        tk.Label(pin_frame, text="Current PIN: " + "*" * len(self.admin_pin),
-                 bg="black", fg="white", font=("Arial", 11)).pack(pady=10)
-        tk.Button(pin_frame, text="Change PIN", command=self.change_admin_pin,
-                  bg="blue", fg="white", font=("Arial", 11, "bold"),
-                  relief="raised", bd=2).pack(pady=5)
+       # ensure inner_frame width follows the canvas width (so content stretches and sits close to scrollbar)
+       def _on_canvas_configure(event):
+           try:
+               # reduce width by scrollbar width + left padding + small margin
+               sb_width = vsb.winfo_width() if vsb.winfo_ismapped() else 16
+               new_w = max(100, event.width - sb_width - left_pad - 4)
+               container_canvas.itemconfig(win_id, width=new_w)
+           except Exception:
+               pass
 
-        # CSV File Location Section
-        csv_frame = tk.LabelFrame(main_container, text="CSV File Location", bg="black",
-                                 font=("Arial", 12, "bold"), fg="#5D3FD3")
-        csv_frame.pack(fill="x", pady=(0, 20))
+       container_canvas.bind("<Configure>", _on_canvas_configure)
 
-        current_csv_label = tk.Label(csv_frame, text="Current CSV: {0}".format(os.path.basename(self.csv_file)),
-                                     bg="black", fg="white", font=("Arial", 11))
-        current_csv_label.pack(pady=10)
-        
-        csv_path_label = tk.Label(csv_frame, text="Path: {0}".format(self.csv_file),
-                                 bg="black", fg="lightgray", font=("Arial", 9))
-        csv_path_label.pack(pady=(0, 10))
-        
-        tk.Button(csv_frame, text="Change CSV Location", command=self.change_csv_location,
-                  bg="blue", fg="white", font=("Arial", 11, "bold"),
-                  relief="raised", bd=2).pack(pady=5)
+       # expose inner_frame as main_container so existing code can use it
+       main_container = inner_frame
 
-        logo_frame = tk.LabelFrame(main_container, text="Logo Settings", bg="black",
-                                  font=("Arial", 12, "bold"), fg="#5D3FD3")
-        logo_frame.pack(fill="x", pady=(0, 20))
+       # keep canvas scrollregion updated when inner content changes
+       def _on_configure(event):
+           try:
+               container_canvas.configure(scrollregion=container_canvas.bbox("all"))
+           except Exception:
+               pass
 
-        tk.Label(logo_frame, text="Current logo: {0}".format(os.path.basename(self.logo_file)),
-                 bg="black", fg="white", font=("Arial", 11)).pack(pady=10)
-        tk.Button(logo_frame, text="Choose Logo", command=self.change_logo,
-                  bg="blue", fg="white", font=("Arial", 11, "bold"),
-                  relief="raised", bd=2).pack(pady=5)
+       inner_frame.bind("<Configure>", _on_configure)
 
-        color_frame = tk.LabelFrame(main_container, text="Appearance", bg="black",
-                                   font=("Arial", 12, "bold"), fg="#5D3FD3")
-        color_frame.pack(fill="x", pady=(0, 20))
+       # Mouse wheel scrolling when pointer is over the canvas
+       def _on_mousewheel(event):
+           # Windows: event.delta is multiple of 120
+           try:
+               container_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+           except Exception:
+               pass
 
-        color_display = tk.Label(color_frame, text="Current header color",
-                                 bg=self.header_color, fg="white", font=("Arial", 11, "bold"),
-                                 relief="sunken", bd=2, width=20, height=2)
-        color_display.pack(pady=10)
-        tk.Button(color_frame, text="Choose Color", command=self.change_header_color,
-                  bg="blue", fg="white", font=("Arial", 11, "bold"),
-                  relief="raised", bd=2).pack(pady=5)
+       container_canvas.bind("<MouseWheel>", _on_mousewheel)
+       # For Linux systems with button 4/5 wheel events
+       container_canvas.bind("<Button-4>", lambda e: container_canvas.yview_scroll(-1, "units"))
+       container_canvas.bind("<Button-5>", lambda e: container_canvas.yview_scroll(1, "units"))
 
-        close_frame = tk.Frame(main_container, bg="black")
-        close_frame.pack(fill="x", pady=(20, 0))
-        tk.Button(close_frame, text="Close", command=lambda: admin_window.destroy(),
-                  bg="red", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack()
+       pin_frame = tk.LabelFrame(main_container, text="Admin PIN", bg="black",
+                           font=("Arial", 12, "bold"), fg="#5D3FD3")
+       pin_frame.pack(fill="x", pady=(0, 20))
+
+       tk.Label(pin_frame, text="Current PIN: " + "*" * len(self.admin_pin),
+              bg="black", fg="white", font=("Arial", 11)).pack(pady=10)
+       tk.Button(pin_frame, text="Change PIN", command=self.change_admin_pin,
+               bg="blue", fg="white", font=("Arial", 11, "bold"),
+               relief="raised", bd=2).pack(pady=5)
+
+       # CSV File Location Section
+       csv_frame = tk.LabelFrame(main_container, text="CSV File Location", bg="black",
+                           font=("Arial", 12, "bold"), fg="#5D3FD3")
+       csv_frame.pack(fill="x", pady=(0, 20))
+
+       current_csv_label = tk.Label(csv_frame, text="Current CSV: {0}".format(os.path.basename(self.csv_file)),
+                              bg="black", fg="white", font=("Arial", 11))
+       current_csv_label.pack(pady=10)
+
+       csv_path_label = tk.Label(csv_frame, text="Path: {0}".format(self.csv_file),
+                           bg="black", fg="lightgray", font=("Arial", 9))
+       csv_path_label.pack(pady=(0, 10))
+
+       tk.Button(csv_frame, text="Change CSV Location", command=self.change_csv_location,
+               bg="blue", fg="white", font=("Arial", 11, "bold"),
+               relief="raised", bd=2).pack(pady=5)
+
+       # Students File Location Section
+       students_frame = tk.LabelFrame(main_container, text="Students File Location", bg="black",
+                                font=("Arial", 12, "bold"), fg="#5D3FD3")
+       students_frame.pack(fill="x", pady=(0, 20))
+
+       students_path = get_students_file()
+       tk.Label(students_frame, text="Current Students: {0}".format(os.path.basename(students_path)),
+              bg="black", fg="white", font=("Arial", 11)).pack(pady=6)
+       tk.Label(students_frame, text="Path: {0}".format(students_path),
+              bg="black", fg="lightgray", font=("Arial", 9)).pack(pady=(0, 8))
+       tk.Button(students_frame, text="Change Students Location", command=self.change_students_location,
+               bg="blue", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
+
+       # Guests File Location Section
+       guests_frame = tk.LabelFrame(main_container, text="Guests File Location", bg="black",
+                              font=("Arial", 12, "bold"), fg="#5D3FD3")
+       guests_frame.pack(fill="x", pady=(0, 20))
+
+       guests_path = get_guests_file()
+       tk.Label(guests_frame, text="Current Guests CSV: {0}".format(os.path.basename(guests_path)),
+              bg="black", fg="white", font=("Arial", 11)).pack(pady=6)
+       tk.Label(guests_frame, text="Path: {0}".format(guests_path),
+              bg="black", fg="lightgray", font=("Arial", 9)).pack(pady=(0, 8))
+       tk.Button(guests_frame, text="Change Guests Location", command=self.change_guests_location,
+               bg="blue", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
+
+       logo_frame = tk.LabelFrame(main_container, text="Logo Settings", bg="black",
+                            font=("Arial", 12, "bold"), fg="#5D3FD3")
+       logo_frame.pack(fill="x", pady=(0, 20))
+
+       tk.Label(logo_frame, text="Current logo: {0}".format(os.path.basename(self.logo_file)),
+              bg="black", fg="white", font=("Arial", 11)).pack(pady=10)
+       tk.Button(logo_frame, text="Choose Logo", command=self.change_logo,
+               bg="blue", fg="white", font=("Arial", 11, "bold"),
+               relief="raised", bd=2).pack(pady=5)
+
+       color_frame = tk.LabelFrame(main_container, text="Appearance", bg="black",
+                            font=("Arial", 12, "bold"), fg="#5D3FD3")
+       color_frame.pack(fill="x", pady=(0, 20))
+
+       color_display = tk.Label(color_frame, text="Current header color",
+                           bg=self.header_color, fg="white", font=("Arial", 11, "bold"),
+                           relief="sunken", bd=2, width=20, height=2)
+       color_display.pack(pady=10)
+       tk.Button(color_frame, text="Choose Color", command=self.change_header_color,
+               bg="blue", fg="white", font=("Arial", 11, "bold"),
+               relief="raised", bd=2).pack(pady=5)
+
+       close_frame = tk.Frame(main_container, bg="black")
+       close_frame.pack(fill="x", pady=(20, 0))
+       tk.Button(close_frame, text="Close", command=lambda: admin_window.destroy(),
+               bg="red", fg="white", font=("Arial", 12, "bold"),
+               relief="raised", bd=2).pack()
 
     def setup_help_tab(self, notebook):
-        help_frame = tk.Frame(notebook, bg="white")
-        notebook.add(help_frame, text="Help")
-        admin_window = notebook.master
+      help_frame = tk.Frame(notebook, bg="black")
+      notebook.add(help_frame, text="Help")
+      admin_window = notebook.master
 
-        title_frame = tk.Frame(help_frame, bg="white")
-        title_frame.pack(fill="x", padx=20, pady=(20, 10))
+      title_frame = tk.Frame(help_frame, bg="black")
+      title_frame.pack(fill="x", padx=20, pady=(20, 10))
 
-        tk.Label(title_frame, text="Attendance System Help", bg="white", fg="navy",
-                 font=("Arial", 18, "bold")).pack()
+      tk.Label(title_frame, text="Attendance System Help", bg="black", fg="white",
+             font=("Arial", 18, "bold")).pack()
 
-        text_frame = tk.Frame(help_frame, bg="white")
-        text_frame.pack(fill="both", expand=True, padx=20, pady=10)
+      text_frame = tk.Frame(help_frame, bg="black")
+      text_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-        text_widget = tk.Text(text_frame, wrap="word", font=("Arial", 11),
-                              bg="white", fg="black", relief="flat",
-                              borderwidth=0, padx=10, pady=10)
-        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
-        text_widget.configure(yscrollcommand=scrollbar.set)
+      text_widget = tk.Text(text_frame, wrap="word", font=("Arial", 11),
+                    bg="black", fg="white", relief="flat",
+                    borderwidth=0, padx=10, pady=10)
+      scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+      text_widget.configure(yscrollcommand=scrollbar.set)
 
-        help_text = """How to Use:
+      help_text = """How to Use:
 Tap a student name to mark them Present
 Tap again to remove them from today's attendance
 Use Guest Sign-In for visitors or unlisted students
@@ -881,35 +1206,35 @@ Keyboard Shortcuts:
 Escape: Toggle fullscreen
 F11: Toggle fullscreen"""
 
-        text_widget.insert("1.0", help_text)
-        text_widget.configure(state="disabled")
+      text_widget.insert("1.0", help_text)
+      text_widget.configure(state="disabled")
 
-        text_widget.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+      text_widget.pack(side="left", fill="both", expand=True)
+      scrollbar.pack(side="right", fill="y")
 
-        btn_frame = tk.Frame(help_frame, bg="white")
-        btn_frame.pack(fill="x", padx=20, pady=20)
+      btn_frame = tk.Frame(help_frame, bg="black")
+      btn_frame.pack(fill="x", padx=20, pady=20)
 
-        btn_frame.grid_columnconfigure(0, weight=1)
-        btn_frame.grid_columnconfigure(1, weight=0)
-        btn_frame.grid_columnconfigure(2, weight=0)
-        btn_frame.grid_columnconfigure(3, weight=0)
-        btn_frame.grid_columnconfigure(4, weight=1)
+      btn_frame.grid_columnconfigure(0, weight=1)
+      btn_frame.grid_columnconfigure(1, weight=0)
+      btn_frame.grid_columnconfigure(2, weight=0)
+      btn_frame.grid_columnconfigure(3, weight=0)
+      btn_frame.grid_columnconfigure(4, weight=1)
 
-        tk.Button(btn_frame, text="Open GitHub Repository",
-                  command=self.open_github,
-                  bg="blue", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2, width=25).grid(row=0, column=1, padx=10)
+      tk.Button(btn_frame, text="Open GitHub Repository",
+            command=self.open_github,
+            bg="blue", fg="white", font=("Arial", 12, "bold"),
+            relief="raised", bd=2, width=25).grid(row=0, column=1, padx=10)
 
-        tk.Button(btn_frame, text="System Info",
-                  command=self.show_system_info,
-                  bg="gray", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).grid(row=0, column=2, padx=10)
+      tk.Button(btn_frame, text="System Info",
+            command=self.show_system_info,
+            bg="gray", fg="white", font=("Arial", 12, "bold"),
+            relief="raised", bd=2).grid(row=0, column=2, padx=10)
 
-        tk.Button(btn_frame, text="Close",
-                  command=lambda: admin_window.destroy(),
-                  bg="red", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).grid(row=0, column=3, padx=10)
+      tk.Button(btn_frame, text="Close",
+            command=lambda: admin_window.destroy(),
+            bg="red", fg="white", font=("Arial", 12, "bold"),
+            relief="raised", bd=2).grid(row=0, column=3, padx=10)
 
     # ---------------- Utilities ----------------
     def refresh_attendance_tree(self, tree):
@@ -923,12 +1248,29 @@ F11: Toggle fullscreen"""
                     tree.insert("", "end", values=(
                         row.get("Date", ""),
                         row.get("Name", ""),
-                        row.get("Status", ""),
-                        row.get("Member Status", "")
+                        row.get("Status", "")
                     ))
         except Exception as e:
             print("refresh_attendance_tree error:", e)
-            tree.insert("", "end", values=("Error", "Could not load data", "Check file", "Error"))
+            tree.insert("", "end", values=("Error", "Could not load data", "Check file"))
+
+    def refresh_guests_tree(self, tree):
+        """Populate a Treeview with guest sign-in rows from the guests CSV"""
+        for item in tree.get_children():
+            tree.delete(item)
+        guests_file = get_guests_file()
+        try:
+            with open(guests_file, "r", encoding="utf-8") as f:
+                r = csv.DictReader(f)
+                for row in r:
+                    tree.insert("", "end", values=(
+                        row.get("Date", ""),
+                        row.get("Name", ""),
+                        row.get("Email", "")
+                    ))
+        except Exception as e:
+            print("refresh_guests_tree error:", e)
+            tree.insert("", "end", values=("Error", "Could not load data", "Check file"))
 
     def refresh_students_listbox(self):
         self.students_listbox.delete(0, tk.END)
@@ -943,8 +1285,32 @@ F11: Toggle fullscreen"""
                 self.students.append(name)
                 ok = save_students(self.students)
                 if ok:
-                    self.refresh_students_listbox()
-                    self.build_student_buttons()
+                    # Refresh admin listbox if present
+                    try:
+                        if hasattr(self, 'students_listbox') and self.students_listbox:
+                            self.refresh_students_listbox()
+                    except Exception:
+                        pass
+
+                    # Reapply current search filter so the new student appears in the main buttons
+                    try:
+                        self.on_search_change()
+                    except Exception:
+                        self.filtered_students = self.students.copy()
+
+                    # Ensure the new student is present in the filtered list so a button will be built
+                    if name not in self.filtered_students:
+                        try:
+                            self.filtered_students.insert(0, name)
+                        except Exception:
+                            self.filtered_students = self.students.copy()
+
+                    # Rebuild main grid
+                    try:
+                        self.build_student_buttons()
+                    except Exception:
+                        pass
+
                     messagebox.showinfo("Success", "Student '{0}' added successfully!".format(name))
                 else:
                     messagebox.showerror("Error", "Failed to save student data")
@@ -1110,7 +1476,7 @@ Config File: {11}
                 try:
                     with open(file_path, "w", newline="", encoding="utf-8") as f:
                         writer = csv.writer(f)
-                        writer.writerow(["Date", "Name", "Status", "Member Status"])
+                        writer.writerow(["Date", "Name", "Status"])
                 except Exception as e:
                     messagebox.showerror("Error", "Cannot create CSV file:\n{0}".format(e))
                     return
@@ -1136,6 +1502,96 @@ Config File: {11}
                 
         except Exception as e:
             messagebox.showerror("Error", "Failed to change CSV location:\n{0}".format(e))
+
+    def change_students_location(self):
+        """Change students.json location and optionally copy existing data"""
+        current = get_students_file()
+        file_path = filedialog.asksaveasfilename(defaultextension=".json",
+                                                 filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                                                 title="Choose Students JSON Location and Name",
+                                                 initialfile=os.path.basename(current),
+                                                 initialdir=os.path.dirname(current))
+        if not file_path:
+            return
+        try:
+            dirn = os.path.dirname(file_path)
+            if dirn and not os.path.exists(dirn):
+                os.makedirs(dirn, exist_ok=True)
+
+            old = current
+            if os.path.exists(old) and not os.path.exists(file_path):
+                if messagebox.askyesno("Copy Existing Students?", "Copy existing students data to new file?"):
+                    try:
+                        import shutil
+                        shutil.copy2(old, file_path)
+                    except Exception as e:
+                        messagebox.showerror("Error", "Failed to copy data:\n{0}".format(e))
+                        return
+
+            # Create if missing
+            if not os.path.exists(file_path):
+                try:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        json.dump([], f)
+                except Exception as e:
+                    messagebox.showerror("Error", "Cannot create students file:\n{0}".format(e))
+                    return
+
+            # Update config and reload
+            self.config["students_file"] = file_path
+            if save_config(self.config):
+                self.students = load_students()
+                self.refresh_students_listbox()
+                self.build_student_buttons()
+                messagebox.showinfo("Success", "Students file changed to:\n{0}".format(file_path))
+            else:
+                messagebox.showerror("Error", "Failed to save configuration")
+        except Exception as e:
+            messagebox.showerror("Error", "Failed to change students file:\n{0}".format(e))
+
+    def change_guests_location(self):
+        """Change guests.csv location and optionally copy existing data"""
+        current = get_guests_file()
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv",
+                                                 filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                                                 title="Choose Guests CSV Location and Name",
+                                                 initialfile=os.path.basename(current),
+                                                 initialdir=os.path.dirname(current))
+        if not file_path:
+            return
+        try:
+            dirn = os.path.dirname(file_path)
+            if dirn and not os.path.exists(dirn):
+                os.makedirs(dirn, exist_ok=True)
+
+            old = current
+            if os.path.exists(old) and not os.path.exists(file_path):
+                if messagebox.askyesno("Copy Existing Guests?", "Copy existing guests data to new file?"):
+                    try:
+                        import shutil
+                        shutil.copy2(old, file_path)
+                    except Exception as e:
+                        messagebox.showerror("Error", "Failed to copy data:\n{0}".format(e))
+                        return
+
+            # Create if missing with header
+            if not os.path.exists(file_path):
+                try:
+                    with open(file_path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["Date", "Name", "Email"])
+                except Exception as e:
+                    messagebox.showerror("Error", "Cannot create guests file:\n{0}".format(e))
+                    return
+
+            # Update config
+            self.config["guests_file"] = file_path
+            if save_config(self.config):
+                messagebox.showinfo("Success", "Guests file changed to:\n{0}".format(file_path))
+            else:
+                messagebox.showerror("Error", "Failed to save configuration")
+        except Exception as e:
+            messagebox.showerror("Error", "Failed to change guests file:\n{0}".format(e))
 
     def change_logo(self):
         if not PIL_AVAILABLE:
