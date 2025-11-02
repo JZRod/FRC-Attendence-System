@@ -419,24 +419,52 @@ class AttendanceApp:
 
         # Search bar
         self.search_frame = tk.Frame(root, bg="black")
-        self.search_frame.pack(fill="x", pady=(5, 0))
-        search_container = tk.Frame(self.search_frame, bg="#333", relief="raised", bd=2)
-        search_container.pack(fill="x", padx=12, pady=5)
-        search_inner = tk.Frame(search_container, bg="#333")
-        search_inner.pack(fill="x", padx=10, pady=8)
-        tk.Label(search_inner, text="🔍", bg="#333", fg="white", font=("Arial", 16)).pack(side="left", padx=(0, 8))
+        # Slightly reduce vertical gap around the search bar
+        self.search_frame.pack(fill="x", pady=(3, 0))
+
+        # Build a top+left outline using separate border frames so the outline
+        # appears only on the top and left sides. The inner search area uses a
+        # slightly darker gray than the buttons.
+        outline_color = "#9a9a9a"  # gray outline
+        inner_bg = "#2b2b2b"       # darker inner background
+
+        search_outer = tk.Frame(self.search_frame, bg="black", relief="flat", bd=0)
+        search_outer.pack(fill="x", padx=12, pady=3)
+
+        # Top border
+        top_border = tk.Frame(search_outer, bg=outline_color, height=2)
+        top_border.pack(side="top", fill="x")
+
+        # Content area holds left border + inner search area
+        # Use the same inner background for the content area so there's no
+        # visible black gap between the outline and the search element.
+        content_area = tk.Frame(search_outer, bg=inner_bg)
+        content_area.pack(side="top", fill="both", expand=True)
+
+        left_border = tk.Frame(content_area, bg=outline_color, width=2)
+        left_border.pack(side="left", fill="y")
+
+        # Pack search_inner immediately adjacent to the left border so there
+        # is no black gap; small internal padding is handled inside search_inner
+        search_inner = tk.Frame(content_area, bg=inner_bg)
+        search_inner.pack(side="left", fill="x", expand=True, padx=0, pady=4)
+
+        tk.Label(search_inner, text="🔍", bg=inner_bg, fg="white", font=("Arial", 16)).pack(side="left", padx=(8, 8))
         self.search_var = tk.StringVar()
         self.search_entry = tk.Entry(
             search_inner,
             textvariable=self.search_var,
             font=("Arial", 14),
-            bg="white",
-            fg="black",
+            bg=inner_bg,
+            fg="white",
             relief="flat",
             bd=0,
+            insertbackground="white",
         )
-        self.search_entry.pack(side="left", fill="x", expand=True)
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.search_entry.insert(0, "Search for a student...")
+        # Placeholder should appear gray until the user focuses and types
+        self.search_entry.configure(fg="gray")
         self.clear_btn = tk.Button(
             search_inner,
             text="Clear",
@@ -449,14 +477,17 @@ class AttendanceApp:
             width=6,
             activebackground="#1A1A1A",
         )
-        self.clear_btn.pack(side="right", padx=(8, 0))
+        self.clear_btn.pack(side="right", padx=(8, 12))
         self.search_var.trace("w", self.on_search_change)
         self.search_entry.bind("<FocusIn>", self.on_search_focus_in)
         self.search_entry.bind("<FocusOut>", self.on_search_focus_out)
 
         # Scrollable student list container
         self.container = tk.Frame(root, bg="black")
-        self.container.pack(fill="both", expand=True)
+        # Add top padding so the gap between the bottom of the search bar and
+        # the top of the student area matches the gap between the guest sign-in
+        # and the top of the search bar (guest bottom 12 + search top 3 = 15px).
+        self.container.pack(fill="both", expand=True, pady=(15, 0))
 
         self.canvas = tk.Canvas(self.container, bg="black", highlightthickness=0)
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -502,6 +533,33 @@ class AttendanceApp:
                 self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
             except Exception:
                 pass
+
+        # Also ensure scrolling works when the cursor is over a button inside
+        # the student_frame: bind/unbind the global wheel events when the
+        # pointer enters/leaves the student area. This lets buttons receive
+        # clicks normally but preserves scrolling while hovering them.
+        def _bind_main_mousewheel(event):
+            try:
+                self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            except Exception:
+                pass
+
+        def _unbind_main_mousewheel(event):
+            try:
+                self.canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+
+        try:
+            # Bind enter/leave on the student_frame so hovering any child (buttons)
+            # will activate scrolling.
+            self.student_frame.bind("<Enter>", _bind_main_mousewheel)
+            self.student_frame.bind("<Leave>", _unbind_main_mousewheel)
+            # Also bind on the canvas itself as a fallback
+            self.canvas.bind("<Enter>", _bind_main_mousewheel)
+            self.canvas.bind("<Leave>", _unbind_main_mousewheel)
+        except Exception:
+            pass
 
         # Load students
         self.students = load_students()
@@ -674,7 +732,8 @@ class AttendanceApp:
         """Handle search entry focus in"""
         if self.search_entry.get() == "Search for a student...":
             self.search_entry.delete(0, tk.END)
-            self.search_entry.configure(fg="black")
+            # Use white text when the user types
+            self.search_entry.configure(fg="white")
 
     def on_search_focus_out(self, event):
         """Handle search entry focus out"""
@@ -1074,6 +1133,28 @@ class AttendanceApp:
        # For Linux systems with button 4/5 wheel events
        container_canvas.bind("<Button-4>", lambda e: container_canvas.yview_scroll(-1, "units"))
        container_canvas.bind("<Button-5>", lambda e: container_canvas.yview_scroll(1, "units"))
+
+       # Bind mouse wheel when the pointer is over the settings inner frame
+       # This mirrors the Help tab behavior: scrolling works while the cursor
+       # is over the content area and stops when it leaves.
+       def _bind_mousewheel(event):
+           try:
+               container_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+               container_canvas.bind_all("<Button-4>", lambda e: container_canvas.yview_scroll(-1, "units"))
+               container_canvas.bind_all("<Button-5>", lambda e: container_canvas.yview_scroll(1, "units"))
+           except Exception:
+               pass
+
+       def _unbind_mousewheel(event):
+           try:
+               container_canvas.unbind_all("<MouseWheel>")
+               container_canvas.unbind_all("<Button-4>")
+               container_canvas.unbind_all("<Button-5>")
+           except Exception:
+               pass
+
+       inner_frame.bind("<Enter>", _bind_mousewheel)
+       inner_frame.bind("<Leave>", _unbind_mousewheel)
 
        pin_frame = tk.LabelFrame(main_container, text="Admin PIN", bg="black",
                            font=("Arial", 12, "bold"), fg="#5D3FD3")

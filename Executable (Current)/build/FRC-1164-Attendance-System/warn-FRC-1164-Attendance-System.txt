@@ -20,11 +20,7 @@ excluded module named _frozen_importlib - imported by importlib (optional), impo
 missing module named grp - imported by shutil (optional), tarfile (optional), pathlib (delayed), setuptools._vendor.backports.tarfile (optional), distutils.archive_util (optional), setuptools._distutils.archive_util (optional)
 missing module named pwd - imported by posixpath (delayed, conditional), shutil (optional), tarfile (optional), pathlib (delayed, conditional, optional), webbrowser (delayed), distutils.util (delayed, conditional, optional), netrc (delayed, conditional), getpass (delayed), setuptools._vendor.backports.tarfile (optional), distutils.archive_util (optional), http.server (delayed, optional), setuptools._distutils.util (delayed, conditional, optional), setuptools._distutils.archive_util (optional)
 missing module named org - imported by pickle (optional)
-<<<<<<< HEAD
 missing module named pyimod02_importers - imported by C:\Users\jrodr\AppData\Roaming\Python\Python38\site-packages\PyInstaller\hooks\rthooks\pyi_rth_pkgutil.py (delayed), C:\Users\jrodr\AppData\Roaming\Python\Python38\site-packages\PyInstaller\hooks\rthooks\pyi_rth_pkgres.py (delayed)
-=======
-missing module named pyimod02_importers - imported by C:\Users\Joshua Rodriguez\AppData\Roaming\Python\Python38\site-packages\PyInstaller\hooks\rthooks\pyi_rth_pkgutil.py (delayed), C:\Users\Joshua Rodriguez\AppData\Roaming\Python\Python38\site-packages\PyInstaller\hooks\rthooks\pyi_rth_pkgres.py (delayed)
->>>>>>> 9f8e17a8ba527c072d0dff12019a8ba127c2b381
 missing module named _posixsubprocess - imported by subprocess (optional), multiprocessing.util (delayed)
 missing module named _manylinux - imported by packaging._manylinux (delayed, optional), setuptools._vendor.packaging._manylinux (delayed, optional), setuptools._vendor.wheel.vendored.packaging._manylinux (delayed, optional)
 missing module named typing_extensions.TypeAlias - imported by setuptools._vendor.typing_extensions (top-level), setuptools._reqs (conditional), setuptools.warnings (conditional), setuptools._path (conditional), setuptools.config.setupcfg (conditional), setuptools.config._apply_pyprojecttoml (conditional), setuptools.dist (conditional), setuptools.command.bdist_egg (conditional), pkg_resources (conditional)
