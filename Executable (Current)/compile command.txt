@@ -1,2 +1,2 @@
- python -m PyInstaller --onefile --noconsole --icon=assets/icon.ico FRC-1164-Attendance-System.py
- This is the compile command
+python -m PyInstaller --onefile --noconsole --icon=assets/icon.ico FRC-1164-Attendance-System.py
+This is the compile command

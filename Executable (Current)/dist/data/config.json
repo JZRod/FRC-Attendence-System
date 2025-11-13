@@ -2,5 +2,7 @@
   "admin_pin": "1234",
   "header_color": "#5D3FD3",
   "logo_file": "assets\\logo.png",
-  "csv_file": "data\\attendance.csv"
+  "csv_file": "data\\attendance.csv",
+  "guests_file": "data\\guests.json",
+  "students_file": "data\\students.json"
 }

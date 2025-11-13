@@ -365,6 +365,11 @@ class AttendanceApp:
         self.header_color = self.config.get("header_color", "#5D3FD3")
         self.logo_file = self.config.get("logo_file", LOGO_FILE)
         self.csv_file = self.config.get("csv_file", DEFAULT_FILENAME)
+        # Backup settings
+        self.backup_location = self.config.get("backup_location", "")
+        self.backup_enabled = self.config.get("backup_enabled", False)
+        self.backup_job = None
+        self.last_backup = None
 
         # Fullscreen toggle
         self.fullscreen = True
@@ -572,6 +577,13 @@ class AttendanceApp:
         except Exception:
             pass
 
+        # If backups were enabled in config, start them
+        try:
+            if self.backup_enabled and self.backup_location:
+                self.start_backups()
+        except Exception:
+            pass
+
     def update_title_with_date(self):
         """Update the title label to include the current date for clarity."""
         try:
@@ -758,7 +770,7 @@ class AttendanceApp:
 
         today = datetime.date.today().isoformat()
         sorted_students = sorted(self.filtered_students, key=str.lower)
-        COLS = 4
+        COLS = 3
 
         for c in range(COLS):
             self.student_frame.grid_columnconfigure(c, weight=1)
@@ -775,8 +787,8 @@ class AttendanceApp:
 
         for name in sorted_students:
             checked = already_checked_in(name, today)
-            # plain name (no emoji/checkmark). When checked, persistently show #1A1A1A
-            bg_color = "#1A1A1A" if checked else "#333333"
+            # plain name (no emoji/checkmark). When checked, persistently show #326B20
+            bg_color = "#326B20" if checked else "#333333"
             btn = tk.Button(self.student_frame, text=name, width=20, height=btn_height,
                             command=lambda n=name: self.checkin(n),
                             bg=bg_color, fg="white",
@@ -830,6 +842,12 @@ class AttendanceApp:
             except Exception as e:
                 print("Failed to save new student to students.json:", e)
 
+            # Keep the master list sorted so any view built from it is alphabetical
+            try:
+                self.students.sort(key=str.lower)
+            except Exception:
+                pass
+
             # If the admin Students tab/listbox exists, refresh it (safe check).
             try:
                 if hasattr(self, 'students_listbox') and self.students_listbox:
@@ -845,14 +863,8 @@ class AttendanceApp:
                 # fallback to showing all students
                 self.filtered_students = self.students.copy()
 
-            # Ensure the new student is present in the filtered list so the button will be built
-            if name not in self.filtered_students:
-                # Put the new student near the front so it's visible immediately
-                try:
-                    self.filtered_students.insert(0, name)
-                except Exception:
-                    # Last-resort: replace filtered list with full students list
-                    self.filtered_students = self.students.copy()
+            # filtered_students is re-computed by on_search_change(); don't force-insert
+            # the new student because build_student_buttons() sorts alphabetically.
 
         # Mark attendance in main CSV and refresh buttons
         mark_attendance(name, "Present")
@@ -884,6 +896,8 @@ class AttendanceApp:
         # Guests admin tab (shows guest sign-ins)
         self.setup_guests_tab(notebook)
         self.setup_students_tab(notebook)
+        # Backup settings now live in their own tab
+        self.setup_backup_tab(notebook)
         self.setup_settings_tab(notebook)
         self.setup_help_tab(notebook)
 
@@ -1080,6 +1094,81 @@ class AttendanceApp:
                   bg="darkred", fg="white", font=("Arial", 12, "bold"),
                   relief="raised", bd=2).pack(side="right", padx=5)
 
+    def setup_backup_tab(self, notebook):
+        """Separate Backup tab so backup controls have their own page."""
+        frame = tk.Frame(notebook, bg="black")
+        notebook.add(frame, text="Backup")
+        admin_window = notebook.master
+
+        main_frame = tk.Frame(frame, bg="black")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Backup folder section
+        folder_frame = tk.LabelFrame(main_frame, text="Backup Folder", bg="black",
+                                     font=("Arial", 12, "bold"), fg="#5D3FD3")
+        folder_frame.pack(fill="x", pady=(0, 20))
+
+        cur_name = os.path.basename(self.backup_location) if self.backup_location else "Not set"
+        tk.Label(folder_frame, text="Current Backup Folder: {0}".format(cur_name),
+                 bg="black", fg="white", font=("Arial", 11)).pack(pady=6)
+
+        self._backup_path_label = tk.Label(folder_frame, text="Path: {0}".format(self.backup_location or "(not configured)"),
+                                           bg="black", fg="lightgray", font=("Arial", 9), wraplength=700, justify="left")
+        self._backup_path_label.pack(pady=(0, 8))
+
+        tk.Button(folder_frame, text="Change Backup Folder", command=lambda: self.change_backup_location(self._backup_path_label),
+                  bg="blue", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
+
+        # Backup now section
+        now_frame = tk.LabelFrame(main_frame, text="Backup Now", bg="black",
+                                  font=("Arial", 12, "bold"), fg="#5D3FD3")
+        now_frame.pack(fill="x", pady=(0, 20))
+
+        tk.Label(now_frame, text="Run an immediate backup of attendance, students, guests, config and assets.",
+                 bg="black", fg="lightgray", font=("Arial", 10), wraplength=700, justify="left").pack(pady=(6, 8))
+
+        tk.Button(now_frame, text="Backup Now", command=lambda: self.perform_backup(notify=True),
+                  bg="green", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
+
+        # Hourly backups section
+        hourly_frame = tk.LabelFrame(main_frame, text="Hourly Backups", bg="black",
+                                     font=("Arial", 12, "bold"), fg="#5D3FD3")
+        hourly_frame.pack(fill="x", pady=(0, 20))
+
+        self.backup_status_label = tk.Label(hourly_frame, text=("Last backup: None" if not self.last_backup else str(self.last_backup)),
+                                            bg="black", fg="white", font=("Arial", 10))
+        self.backup_status_label.pack(anchor="w", pady=(6, 8), padx=6)
+
+        def _toggle_backups():
+            if getattr(self, 'backup_job', None):
+                self.stop_backups()
+                toggle_btn.configure(text="Start Hourly Backups")
+                try:
+                    self.backup_status_label.configure(text="Backups stopped")
+                except Exception:
+                    pass
+            else:
+                if not self.backup_location:
+                    messagebox.showwarning("Backup", "Please choose a backup folder first")
+                    return
+                self.start_backups()
+                toggle_btn.configure(text="Stop Hourly Backups")
+                try:
+                    self.backup_status_label.configure(text=("Last backup: {0}".format(self.last_backup) if self.last_backup else "Backups running"))
+                except Exception:
+                    pass
+
+        toggle_btn = tk.Button(hourly_frame, text=("Stop Hourly Backups" if self.backup_enabled else "Start Hourly Backups"),
+                               command=_toggle_backups,
+                               bg="orange", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2)
+        toggle_btn.pack(pady=5)
+
+        # Close button
+        close_frame = tk.Frame(main_frame, bg="black")
+        close_frame.pack(fill="x", pady=(10, 0))
+        tk.Button(close_frame, text="Close", command=lambda: admin_window.destroy(),
+                  bg="red", fg="white", font=("Arial", 12, "bold"), relief="raised", bd=2).pack()
+
     def setup_settings_tab(self, notebook):
        settings_frame = tk.Frame(notebook, bg="black")
        notebook.add(settings_frame, text="Settings")
@@ -1209,6 +1298,8 @@ class AttendanceApp:
        tk.Button(guests_frame, text="Change Guests Location", command=self.change_guests_location,
                bg="blue", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
 
+
+
        logo_frame = tk.LabelFrame(main_container, text="Logo Settings", bg="black",
                             font=("Arial", 12, "bold"), fg="#5D3FD3")
        logo_frame.pack(fill="x", pady=(0, 20))
@@ -1246,14 +1337,14 @@ class AttendanceApp:
       title_frame.pack(fill="x", padx=20, pady=(20, 10))
 
       tk.Label(title_frame, text="Attendance System Help", bg="black", fg="white",
-             font=("Arial", 18, "bold")).pack()
+           font=("Arial", 18, "bold")).pack()
 
       text_frame = tk.Frame(help_frame, bg="black")
       text_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
       text_widget = tk.Text(text_frame, wrap="word", font=("Arial", 11),
-                    bg="black", fg="white", relief="flat",
-                    borderwidth=0, padx=10, pady=10)
+                bg="black", fg="white", relief="flat",
+                borderwidth=0, padx=10, pady=10)
       scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
       text_widget.configure(yscrollcommand=scrollbar.set)
 
@@ -1303,19 +1394,19 @@ F11: Toggle fullscreen"""
       btn_frame.grid_columnconfigure(4, weight=1)
 
       tk.Button(btn_frame, text="Open GitHub Repository",
-            command=self.open_github,
-            bg="blue", fg="white", font=("Arial", 12, "bold"),
-            relief="raised", bd=2, width=25).grid(row=0, column=1, padx=10)
+          command=self.open_github,
+          bg="blue", fg="white", font=("Arial", 12, "bold"),
+          relief="raised", bd=2, width=25).grid(row=0, column=1, padx=10)
 
       tk.Button(btn_frame, text="System Info",
-            command=self.show_system_info,
-            bg="gray", fg="white", font=("Arial", 12, "bold"),
-            relief="raised", bd=2).grid(row=0, column=2, padx=10)
+          command=self.show_system_info,
+          bg="gray", fg="white", font=("Arial", 12, "bold"),
+          relief="raised", bd=2).grid(row=0, column=2, padx=10)
 
       tk.Button(btn_frame, text="Close",
-            command=lambda: admin_window.destroy(),
-            bg="red", fg="white", font=("Arial", 12, "bold"),
-            relief="raised", bd=2).grid(row=0, column=3, padx=10)
+          command=lambda: admin_window.destroy(),
+          bg="red", fg="white", font=("Arial", 12, "bold"),
+          relief="raised", bd=2).grid(row=0, column=3, padx=10)
 
     # ---------------- Utilities ----------------
     def refresh_attendance_tree(self, tree):
@@ -1366,7 +1457,12 @@ F11: Toggle fullscreen"""
                 self.students.append(name)
                 ok = save_students(self.students)
                 if ok:
-                    # Refresh admin listbox if present
+                    # Keep master list sorted and refresh admin UI
+                    try:
+                        self.students.sort(key=str.lower)
+                    except Exception:
+                        pass
+
                     try:
                         if hasattr(self, 'students_listbox') and self.students_listbox:
                             self.refresh_students_listbox()
@@ -1379,12 +1475,8 @@ F11: Toggle fullscreen"""
                     except Exception:
                         self.filtered_students = self.students.copy()
 
-                    # Ensure the new student is present in the filtered list so a button will be built
-                    if name not in self.filtered_students:
-                        try:
-                            self.filtered_students.insert(0, name)
-                        except Exception:
-                            self.filtered_students = self.students.copy()
+                    # filtered_students is re-computed by on_search_change(); don't force-insert
+                    # the new student because build_student_buttons() sorts alphabetically.
 
                     # Rebuild main grid
                     try:
@@ -1719,6 +1811,123 @@ Config File: {11}
                     messagebox.showerror("Error", "Failed to save configuration")
         except Exception as e:
             messagebox.showerror("Error", "Failed to change color: {0}".format(e))
+
+    # ---------------- Backup functions ----------------
+    def change_backup_location(self, path_label=None):
+        """Ask user for backup folder and save to config."""
+        file_path = filedialog.askdirectory(title="Choose Backup Folder")
+        if not file_path:
+            return
+        try:
+            os.makedirs(file_path, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("Error", "Could not create folder: {0}".format(e))
+            return
+        self.backup_location = file_path
+        self.config["backup_location"] = file_path
+        save_config(self.config)
+        if path_label:
+            try:
+                path_label.configure(text="Path: {0}".format(self.backup_location))
+            except Exception:
+                pass
+
+    def perform_backup(self, notify=False):
+        """Perform an immediate backup of data/config/assets into the backup folder."""
+        if not self.backup_location:
+            if notify:
+                messagebox.showwarning("Backup", "Backup folder not configured.")
+            return False
+
+        try:
+            import shutil
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            dest = os.path.join(self.backup_location, ts)
+            os.makedirs(dest, exist_ok=True)
+
+            # Files to copy
+            sources = [get_csv_file(), get_students_file(), get_guests_file(), CONFIG_FILE]
+            for s in sources:
+                try:
+                    if s and os.path.exists(s):
+                        shutil.copy2(s, os.path.join(dest, os.path.basename(s)))
+                except Exception:
+                    # non-fatal per-file
+                    pass
+
+            # Copy assets folder if present
+            try:
+                if os.path.exists(ASSETS_FOLDER):
+                    target_assets = os.path.join(dest, os.path.basename(ASSETS_FOLDER))
+                    # Python 3.8+: dirs_exist_ok parameter
+                    try:
+                        shutil.copytree(ASSETS_FOLDER, target_assets, dirs_exist_ok=True)
+                    except TypeError:
+                        # older fallback: try copytree to non-existing target
+                        if os.path.exists(target_assets):
+                            shutil.rmtree(target_assets)
+                        shutil.copytree(ASSETS_FOLDER, target_assets)
+            except Exception:
+                pass
+
+            self.last_backup = datetime.datetime.now().isoformat()
+            try:
+                if hasattr(self, 'backup_status_label') and self.backup_status_label:
+                    self.backup_status_label.configure(text=("Last backup: {0}".format(self.last_backup)))
+            except Exception:
+                pass
+
+            if notify:
+                messagebox.showinfo("Backup", "Backup completed: {0}".format(dest))
+            return True
+        except Exception as e:
+            if notify:
+                messagebox.showerror("Backup Error", "Backup failed: {0}".format(e))
+            return False
+
+    def _backup_worker(self):
+        """Internal worker invoked by Tk after scheduling; performs backup and reschedules."""
+        try:
+            self.perform_backup(notify=False)
+        except Exception:
+            pass
+        # schedule next run in one hour
+        try:
+            self.backup_job = self.root.after(60 * 60 * 1000, self._backup_worker)
+        except Exception:
+            self.backup_job = None
+
+    def start_backups(self):
+        """Start hourly backups (immediate run + schedule)."""
+        if not self.backup_location:
+            messagebox.showwarning("Backup", "Choose a backup folder first")
+            return False
+        # Save enabled flag
+        self.backup_enabled = True
+        self.config["backup_enabled"] = True
+        save_config(self.config)
+        # perform immediate backup and schedule next
+        try:
+            self.perform_backup(notify=False)
+        except Exception:
+            pass
+        try:
+            self.backup_job = self.root.after(60 * 60 * 1000, self._backup_worker)
+        except Exception:
+            self.backup_job = None
+        return True
+
+    def stop_backups(self):
+        """Stop scheduled hourly backups."""
+        try:
+            if getattr(self, 'backup_job', None):
+                self.root.after_cancel(self.backup_job)
+        except Exception:
+            pass
+        self.backup_job = None
+        self.backup_enabled = False
+        self.config["backup_enabled"] = False
+        save_config(self.config)
 
 # ---------------- Main Application ----------------
 def main():

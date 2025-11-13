@@ -4,5 +4,6 @@
   "logo_file": "D:/Python Project/NEW/FRC-Attendence-System/Executable (Current)/TEST/assets/logo.png",
   "csv_file": "D:/Python Project/NEW/FRC-Attendence-System/Executable (Current)/data/attendance.csv",
   "students_file": "data\\students.json",
-  "guests_file": "data\\guests.csv"
+  "guests_file": "data\\guests.csv",
+  "backup_location": "D:/Python Project/NEW/Backup Tests"
 }
