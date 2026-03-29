@@ -1293,6 +1293,10 @@ class AttendanceApp:
                bg="blue", fg="white", font=("Arial", 11, "bold"),
                relief="raised", bd=2).pack(pady=5)
 
+       tk.Button(csv_frame, text="Import Attendance Data", command=self.import_attendance_data,
+               bg="green", fg="white", font=("Arial", 11, "bold"),
+               relief="raised", bd=2).pack(pady=5)
+
        # Students File Location Section
        students_frame = tk.LabelFrame(main_container, text="Students File Location", bg="black",
                                 font=("Arial", 12, "bold"), fg="#5D3FD3")
@@ -1305,6 +1309,9 @@ class AttendanceApp:
               bg="black", fg="lightgray", font=("Arial", 9)).pack(pady=(0, 8))
        tk.Button(students_frame, text="Change Students Location", command=self.change_students_location,
                bg="blue", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
+
+       tk.Button(students_frame, text="Import Students Data", command=self.import_students_data,
+               bg="green", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
 
        # Guests File Location Section
        guests_frame = tk.LabelFrame(main_container, text="Guests File Location", bg="black",
@@ -1820,6 +1827,66 @@ Config File: {11}
                     messagebox.showerror("Error", "Failed to save configuration")
         except Exception as e:
             messagebox.showerror("Error", "Failed to change color: {0}".format(e))
+
+    def import_attendance_data(self):
+        """Import attendance data from a CSV file"""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Select Attendance CSV to Import"
+        )
+        if not file_path:
+            return
+        try:
+            # Load the CSV data
+            imported_data = []
+            with open(file_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Validate required fields
+                    if "Date" in row and "Name" in row and "Status" in row:
+                        imported_data.append(row)
+                    else:
+                        messagebox.showwarning("Warning", "CSV file format may be incorrect. Expected columns: Date, Name, Status")
+                        return
+            
+            # Confirm import
+            if messagebox.askyesno("Confirm Import", 
+                                  "Import {0} attendance records? This will replace current data.".format(len(imported_data))):
+                global attendance_data
+                attendance_data = imported_data
+                save_attendance_data()
+                messagebox.showinfo("Success", "Attendance data imported successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", "Failed to import attendance data:\n{0}".format(e))
+
+    def import_students_data(self):
+        """Import students data from a JSON file"""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Select Students JSON to Import"
+        )
+        if not file_path:
+            return
+        try:
+            # Load the JSON data
+            with open(file_path, "r", encoding="utf-8") as f:
+                imported_students = json.load(f)
+            
+            # Validate it's a list
+            if not isinstance(imported_students, list):
+                messagebox.showerror("Error", "Invalid JSON format. Expected a list of students.")
+                return
+            
+            # Confirm import
+            if messagebox.askyesno("Confirm Import", 
+                                  "Import {0} students? This will replace current student list.".format(len(imported_students))):
+                save_students(imported_students)
+                self.students = imported_students
+                self.refresh_students_listbox()
+                self.build_student_buttons()
+                messagebox.showinfo("Success", "Students data imported successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", "Failed to import students data:\n{0}".format(e))
 
     # ---------------- Backup functions ----------------
     def change_backup_location(self, path_label=None):
