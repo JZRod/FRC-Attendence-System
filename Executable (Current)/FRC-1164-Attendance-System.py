@@ -24,7 +24,9 @@ except Exception:
     PIL_AVAILABLE = False
     RESAMPLE_METHOD = None
 
-# ---------------- Config ----------------
+# ---------------- Global Variables ----------------
+attendance_data = []  # List of dicts: [{'Date': '', 'Name': '', 'Status': ''}, ...]
+guests_data = []  # List of dicts for guests
 DATA_FOLDER = "data"
 ASSETS_FOLDER = "assets"
 DEFAULT_FILENAME = os.path.join(DATA_FOLDER, "attendance.csv")
@@ -85,6 +87,62 @@ def get_guests_file():
         return path
     except Exception:
         return GUESTS_FILE
+
+def load_attendance_data():
+    """Load attendance data from CSV into global list"""
+    global attendance_data
+    csv_file = get_csv_file()
+    attendance_data = []
+    try:
+        with open(csv_file, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                attendance_data.append(row)
+    except FileNotFoundError:
+        pass  # File doesn't exist yet
+    except Exception as e:
+        print("Error loading attendance data:", e)
+
+def save_attendance_data():
+    """Save global attendance data to CSV"""
+    global attendance_data
+    csv_file = get_csv_file()
+    try:
+        with open(csv_file, "w", newline="", encoding="utf-8") as f:
+            if attendance_data:
+                writer = csv.DictWriter(f, fieldnames=["Date", "Name", "Status"])
+                writer.writeheader()
+                writer.writerows(attendance_data)
+    except Exception as e:
+        print("Error saving attendance data:", e)
+
+def load_guests_data():
+    """Load guests data from CSV into global list"""
+    global guests_data
+    guests_file = get_guests_file()
+    guests_data = []
+    try:
+        with open(guests_file, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                guests_data.append(row)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print("Error loading guests data:", e)
+
+def save_guests_data():
+    """Save global guests data to CSV"""
+    global guests_data
+    guests_file = get_guests_file()
+    try:
+        with open(guests_file, "w", newline="", encoding="utf-8") as f:
+            if guests_data:
+                writer = csv.DictWriter(f, fieldnames=["Date", "Name", "Email"])
+                writer.writeheader()
+                writer.writerows(guests_data)
+    except Exception as e:
+        print("Error saving guests data:", e)
 
 def init_files():
     os.makedirs(DATA_FOLDER, exist_ok=True)
@@ -223,18 +281,10 @@ def already_checked_in(name, date_iso):
     This ensures daily attendance is tracked independently - each day has its own records.
     Previous days' attendance will never be affected by checking today's attendance.
     """
-    csv_file = get_csv_file()
-    try:
-        with open(csv_file, "r", encoding="utf-8") as f:
-            r = csv.DictReader(f)
-            for row in r:
-                if row.get("Date") == date_iso and row.get("Name") == name and row.get("Status") == "Present":
-                    return True
-    except FileNotFoundError:
-        return False
-    except Exception as e:
-        print("already_checked_in error:", e)
-        return False
+    global attendance_data
+    for row in attendance_data:
+        if row.get("Date") == date_iso and row.get("Name") == name and row.get("Status") == "Present":
+            return True
     return False
 
 def remove_attendance(name, date_iso):
@@ -243,52 +293,26 @@ def remove_attendance(name, date_iso):
     This preserves all other dates' attendance records - only the matching
     date + name combination is removed. Previous days remain unchanged.
     """
-    csv_file = get_csv_file()
-    updated_rows = []
-    removed = False
-    try:
-        with open(csv_file, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if (row.get("Date") == date_iso and row.get("Name") == name and
-                        row.get("Status") == "Present" and not removed):
-                    removed = True
-                    continue
-                updated_rows.append(row)
-        with open(csv_file, "w", newline="", encoding="utf-8") as f:
-            fieldnames = ["Date", "Name", "Status"]
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for r in updated_rows:
-                out = {k: r.get(k, "") for k in fieldnames}
-                writer.writerow(out)
-    except FileNotFoundError:
-        return False
-    except Exception as e:
-        print("remove_attendance error:", e)
-        return False
-    return removed
+    global attendance_data
+    for i, row in enumerate(attendance_data):
+        if (row.get("Date") == date_iso and row.get("Name") == name and
+                row.get("Status") == "Present"):
+            del attendance_data[i]
+            save_attendance_data()
+            return True
+    return False
 
 
 def get_last_recorded_date():
     """
     Return the last non-empty Date value recorded in the CSV, or None if no records.
     """
-    csv_file = get_csv_file()
-    last_date = None
-    try:
-        with open(csv_file, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                d = (row.get("Date") or "").strip()
-                if d:
-                    last_date = d
-    except FileNotFoundError:
-        return None
-    except Exception as e:
-        print("get_last_recorded_date error:", e)
-        return None
-    return last_date
+    global attendance_data
+    for row in reversed(attendance_data):
+        d = (row.get("Date") or "").strip()
+        if d:
+            return d
+    return None
 
 
 def append_new_day_section(date_iso):
@@ -298,6 +322,7 @@ def append_new_day_section(date_iso):
 
     The marker row will look like: [date_iso, '--- NEW DAY ---', '', '']
     """
+    global attendance_data
     csv_file = get_csv_file()
     try:
         # Ensure file exists with header
@@ -312,9 +337,9 @@ def append_new_day_section(date_iso):
         if last == date_iso:
             return True
 
-        with open(csv_file, "a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([date_iso, "--- NEW DAY ---", ""])
+        new_row = {"Date": date_iso, "Name": "--- NEW DAY ---", "Status": ""}
+        attendance_data.append(new_row)
+        save_attendance_data()
         return True
     except Exception as e:
         print("append_new_day_section error:", e)
@@ -344,9 +369,9 @@ def mark_attendance(name, status="Present"):
         else:
             return False, "{0} is already marked Present today.".format(name)
     try:
-        with open(csv_file, "a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([today, name, status])
+        new_row = {"Date": today, "Name": name, "Status": status}
+        attendance_data.append(new_row)
+        save_attendance_data()
         return True, "Welcome, {0}! You're marked {1}.".format(name, status)
     except Exception as e:
         print("mark_attendance error:", e)
@@ -565,6 +590,10 @@ class AttendanceApp:
             self.canvas.bind("<Leave>", _unbind_main_mousewheel)
         except Exception:
             pass
+
+        # Load data
+        load_attendance_data()
+        load_guests_data()
 
         # Load students
         self.students = load_students()
@@ -824,12 +853,10 @@ class AttendanceApp:
 
         # Append to guests CSV
         try:
-            guests_file = get_guests_file()
-            os.makedirs(os.path.dirname(guests_file), exist_ok=True) if os.path.dirname(guests_file) else None
             today = datetime.date.today().isoformat()
-            with open(guests_file, "a", newline="", encoding="utf-8") as gf:
-                gw = csv.writer(gf)
-                gw.writerow([today, name, email])
+            new_guest = {"Date": today, "Name": name, "Email": email}
+            guests_data.append(new_guest)
+            save_guests_data()
         except Exception as e:
             print("Failed to record guest:", e)
 
@@ -944,19 +971,13 @@ class AttendanceApp:
         tree_frame.grid_columnconfigure(0, weight=1)
 
         # Load attendance data
-        csv_file = get_csv_file()
-        try:
-            with open(csv_file, "r", encoding="utf-8") as f:
-                r = csv.DictReader(f)
-                for row in r:
-                    tree.insert("", "end", values=(
-                        row.get("Date", ""),
-                        row.get("Name", ""),
-                        row.get("Status", "")
-                    ))
-        except Exception as e:
-            print("Error loading attendance data:", e)
-            tree.insert("", "end", values=("Error", "Could not load data", "Check file"))
+        global attendance_data
+        for row in attendance_data:
+            tree.insert("", "end", values=(
+                row.get("Date", ""),
+                row.get("Name", ""),
+                row.get("Status", "")
+            ))
 
         btn_frame = tk.Frame(frame, bg="black")
         btn_frame.pack(pady=10, fill="x", padx=10)
@@ -1410,39 +1431,27 @@ F11: Toggle fullscreen"""
 
     # ---------------- Utilities ----------------
     def refresh_attendance_tree(self, tree):
+        global attendance_data
         for item in tree.get_children():
             tree.delete(item)
-        csv_file = get_csv_file()
-        try:
-            with open(csv_file, "r", encoding="utf-8") as f:
-                r = csv.DictReader(f)
-                for row in r:
-                    tree.insert("", "end", values=(
-                        row.get("Date", ""),
-                        row.get("Name", ""),
-                        row.get("Status", "")
-                    ))
-        except Exception as e:
-            print("refresh_attendance_tree error:", e)
-            tree.insert("", "end", values=("Error", "Could not load data", "Check file"))
+        for row in attendance_data:
+            tree.insert("", "end", values=(
+                row.get("Date", ""),
+                row.get("Name", ""),
+                row.get("Status", "")
+            ))
 
     def refresh_guests_tree(self, tree):
         """Populate a Treeview with guest sign-in rows from the guests CSV"""
+        global guests_data
         for item in tree.get_children():
             tree.delete(item)
-        guests_file = get_guests_file()
-        try:
-            with open(guests_file, "r", encoding="utf-8") as f:
-                r = csv.DictReader(f)
-                for row in r:
-                    tree.insert("", "end", values=(
-                        row.get("Date", ""),
-                        row.get("Name", ""),
-                        row.get("Email", "")
-                    ))
-        except Exception as e:
-            print("refresh_guests_tree error:", e)
-            tree.insert("", "end", values=("Error", "Could not load data", "Check file"))
+        for row in guests_data:
+            tree.insert("", "end", values=(
+                row.get("Date", ""),
+                row.get("Name", ""),
+                row.get("Email", "")
+            ))
 
     def refresh_students_listbox(self):
         self.students_listbox.delete(0, tk.END)
