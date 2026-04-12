@@ -1,15 +1,31 @@
-import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk, filedialog, colorchooser
+import sys
+import os
 import csv
 import datetime
-import os
 import json
-import sys
 import webbrowser
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLabel, QPushButton, QLineEdit, QTextEdit, QScrollArea, QFrame, QTabWidget,
+    QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem, QHeaderView,
+    QMessageBox, QInputDialog, QFileDialog, QColorDialog, QGroupBox, QSplitter,
+    QTreeWidget, QTreeWidgetItem, QProgressBar, QStatusBar, QMenuBar, QMenu,
+    QDialog, QDialogButtonBox, QFormLayout, QComboBox, QCheckBox, QSpinBox,
+    QDoubleSpinBox, QRadioButton, QButtonGroup, QTextBrowser, QPlainTextEdit, QSizePolicy
+)
+from PyQt6.QtGui import (
+    QPixmap, QIcon, QFont, QColor, QPalette, QPainter, QBrush, QPen,
+    QAction, QKeySequence, QImage, QTransform
+)
+from PyQt6.QtCore import (
+    Qt, QTimer, QDateTime, QThread, pyqtSignal, QRect, QSize, QPoint,
+    QPropertyAnimation, QEasingCurve, QUrl, QMimeData, QEvent
+)
+import requests  # for potential web features
 
 # Pillow import with backward-friendly fallbacks
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageQt
     PIL_AVAILABLE = True
     try:
         RESAMPLE_METHOD = Image.LANCZOS
@@ -20,7 +36,7 @@ try:
             RESAMPLE_METHOD = None
 except Exception:
     Image = None
-    ImageTk = None
+    ImageQt = None
     PIL_AVAILABLE = False
     RESAMPLE_METHOD = None
 
@@ -41,10 +57,12 @@ DEFAULT_CONFIG = {
     "admin_pin": "1234",
     "header_color": "#5D3FD3",
     "logo_file": LOGO_FILE,
-    "csv_file": DEFAULT_FILENAME
+    "csv_file": DEFAULT_FILENAME,
+    "backup_retention_days": 30,
+    "backup_interval_hours": 1
 }
 
-HEADER_HEIGHT = 150
+HEADER_HEIGHT = 50
 
 # ---------------- Storage Helpers ----------------
 def get_csv_file():
@@ -378,11 +396,11 @@ def mark_attendance(name, status="Present"):
         return False, "Failed to mark attendance: {0}".format(e)
 
 # ---------------- GUI App ----------------
-class AttendanceApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("FRC Attendance System")
-        self.root.configure(bg="black")
+class AttendanceApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("FRC Attendance System")
+        self.setMinimumSize(800, 600)
 
         # Load configuration
         self.config = load_config()
@@ -393,201 +411,23 @@ class AttendanceApp:
         # Backup settings
         self.backup_location = self.config.get("backup_location", "")
         self.backup_enabled = self.config.get("backup_enabled", False)
+        self.backup_retention_days = self.config.get("backup_retention_days", 30)
+        self.backup_interval_hours = self.config.get("backup_interval_hours", 1)
         self.backup_job = None
         self.last_backup = None
 
         # Fullscreen toggle
-        self.fullscreen = True
+        self.fullscreen = False
+
+        self.setup_ui()
         self.setup_fullscreen()
-        self.root.bind("<Escape>", self.toggle_fullscreen)
-        self.root.bind("<F11>", self.toggle_fullscreen)
-
-        # Header
-        self.header = tk.Frame(root, bg=self.header_color, height=HEADER_HEIGHT)
-        self.header.pack(fill="x")
-        self.header.pack_propagate(False)
-        self.header.rowconfigure(0, weight=1)
-        self.header.columnconfigure(0, minsize=HEADER_HEIGHT)
-        self.header.columnconfigure(1, weight=1)
-        self.header.columnconfigure(2, minsize=120)
-
-        # Logo
         self.setup_logo()
-
-        # Title
-        self.title_label = tk.Label(self.header, text="📌 Tap Your Name to Check In",
-                                    bg=self.header_color, fg="white", font=("Arial", 20, "bold"))
-        self.title_label.grid(row=0, column=1, sticky="nsew")
 
         # Track current date so we can detect day changes while the app is running
         self.current_date = datetime.date.today().isoformat()
         # Show the current date in the header
         try:
             self.update_title_with_date()
-        except Exception:
-            pass
-
-        # Admin button (gear)
-        self.setup_admin_button()
-
-        # Guest Sign In
-        self.guest_frame = tk.Frame(root, bg="black")
-        self.guest_frame.pack(fill="x", pady=(10, 0))
-        self.guest_btn = tk.Button(
-            self.guest_frame,
-            text="Guest Sign In — Tap to Enter Your Name",
-            command=self.guest_sign_in,
-            bg="#333333",
-            fg="white",
-            font=("Arial", 14, "bold"),
-            height=2,
-            relief="raised",
-            activebackground="#1A1A1A",
-            activeforeground="white",
-        )
-        self.guest_btn.pack(fill="x", padx=12, pady=12)
-
-        # Search bar
-        self.search_frame = tk.Frame(root, bg="black")
-        # Slightly reduce vertical gap around the search bar
-        self.search_frame.pack(fill="x", pady=(3, 0))
-
-        # Build a top+left outline using separate border frames so the outline
-        # appears only on the top and left sides. The inner search area uses a
-        # slightly darker gray than the buttons.
-        outline_color = "#9a9a9a"  # gray outline
-        inner_bg = "#2b2b2b"       # darker inner background
-
-        search_outer = tk.Frame(self.search_frame, bg="black", relief="flat", bd=0)
-        search_outer.pack(fill="x", padx=12, pady=3)
-
-        # Top border
-        top_border = tk.Frame(search_outer, bg=outline_color, height=2)
-        top_border.pack(side="top", fill="x")
-
-        # Content area holds left border + inner search area
-        # Use the same inner background for the content area so there's no
-        # visible black gap between the outline and the search element.
-        content_area = tk.Frame(search_outer, bg=inner_bg)
-        content_area.pack(side="top", fill="both", expand=True)
-
-        left_border = tk.Frame(content_area, bg=outline_color, width=2)
-        left_border.pack(side="left", fill="y")
-
-        # Pack search_inner immediately adjacent to the left border so there
-        # is no black gap; small internal padding is handled inside search_inner
-        search_inner = tk.Frame(content_area, bg=inner_bg)
-        search_inner.pack(side="left", fill="x", expand=True, padx=0, pady=4)
-
-        tk.Label(search_inner, text="🔍", bg=inner_bg, fg="white", font=("Arial", 16)).pack(side="left", padx=(8, 8))
-        self.search_var = tk.StringVar()
-        self.search_entry = tk.Entry(
-            search_inner,
-            textvariable=self.search_var,
-            font=("Arial", 14),
-            bg=inner_bg,
-            fg="white",
-            relief="flat",
-            bd=0,
-            insertbackground="white",
-        )
-        self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.search_entry.insert(0, "Search for a student...")
-        # Placeholder should appear gray until the user focuses and types
-        self.search_entry.configure(fg="gray")
-        self.clear_btn = tk.Button(
-            search_inner,
-            text="Clear",
-            command=self.clear_search,
-            bg="#555",
-            fg="white",
-            font=("Arial", 12, "bold"),
-            relief="flat",
-            bd=0,
-            width=6,
-            activebackground="#1A1A1A",
-        )
-        self.clear_btn.pack(side="right", padx=(8, 12))
-        self.search_var.trace("w", self.on_search_change)
-        self.search_entry.bind("<FocusIn>", self.on_search_focus_in)
-        self.search_entry.bind("<FocusOut>", self.on_search_focus_out)
-
-        # Scrollable student list container
-        self.container = tk.Frame(root, bg="black")
-        # Add top padding so the gap between the bottom of the search bar and
-        # the top of the student area matches the gap between the guest sign-in
-        # and the top of the search bar (guest bottom 12 + search top 3 = 15px).
-        self.container.pack(fill="both", expand=True, pady=(15, 0))
-
-        self.canvas = tk.Canvas(self.container, bg="black", highlightthickness=0)
-        self.canvas.pack(side="left", fill="both", expand=True)
-
-        self.v_scrollbar = ttk.Scrollbar(self.container, orient="vertical", command=self.canvas.yview)
-        self.v_scrollbar.pack(side="right", fill="y")
-
-        self.student_frame = tk.Frame(self.canvas, bg="black")
-        self.student_frame_id = self.canvas.create_window((0, 0), window=self.student_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.v_scrollbar.set)
-
-        # Dynamic resize and scroll behavior
-        def _resize_inner(event):
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-            try:
-                self.canvas.itemconfigure(self.student_frame_id, width=self.canvas.winfo_width())
-            except Exception:
-                pass
-            bbox = self.canvas.bbox("all")
-            if bbox:
-                content_height = bbox[3] - bbox[1]
-                canvas_height = self.canvas.winfo_height()
-                if content_height > canvas_height:
-                    self.v_scrollbar.pack(side="right", fill="y")
-                else:
-                    self.v_scrollbar.pack_forget()
-
-        self.student_frame.bind("<Configure>", _resize_inner)
-
-        # Mousewheel scrolling
-        def _on_mousewheel(event):
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        # Bind mousewheel only to the main canvas and its internal frame so that
-        # other windows (like the Admin panel) can handle scrolling independently.
-        # Previously bind_all caused the admin window mousewheel to scroll the main app.
-        try:
-            self.canvas.bind("<MouseWheel>", _on_mousewheel)
-            self.student_frame.bind("<MouseWheel>", _on_mousewheel)
-        except Exception:
-            # Fallback to the old behavior only if necessary
-            try:
-                self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
-            except Exception:
-                pass
-
-        # Also ensure scrolling works when the cursor is over a button inside
-        # the student_frame: bind/unbind the global wheel events when the
-        # pointer enters/leaves the student area. This lets buttons receive
-        # clicks normally but preserves scrolling while hovering them.
-        def _bind_main_mousewheel(event):
-            try:
-                self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
-            except Exception:
-                pass
-
-        def _unbind_main_mousewheel(event):
-            try:
-                self.canvas.unbind_all("<MouseWheel>")
-            except Exception:
-                pass
-
-        try:
-            # Bind enter/leave on the student_frame so hovering any child (buttons)
-            # will activate scrolling.
-            self.student_frame.bind("<Enter>", _bind_main_mousewheel)
-            self.student_frame.bind("<Leave>", _unbind_main_mousewheel)
-            # Also bind on the canvas itself as a fallback
-            self.canvas.bind("<Enter>", _bind_main_mousewheel)
-            self.canvas.bind("<Leave>", _unbind_main_mousewheel)
         except Exception:
             pass
 
@@ -598,6 +438,7 @@ class AttendanceApp:
         # Load students
         self.students = load_students()
         self.filtered_students = self.students.copy()
+
         self.build_student_buttons()
 
         # Start periodic daily check (runs every 30 seconds) to detect day changes
@@ -613,33 +454,253 @@ class AttendanceApp:
         except Exception:
             pass
 
+    def setup_ui(self):
+        """Setup the main user interface"""
+        # Set dark theme
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: black;
+                color: white;
+            }
+            QWidget {
+                background-color: black;
+                color: white;
+            }
+            QPushButton {
+                background-color: #333333;
+                color: white;
+                border: 2px solid #555555;
+                padding: 8px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1A1A1A;
+            }
+            QPushButton:pressed {
+                background-color: #000000;
+            }
+            QLineEdit {
+                background-color: #2b2b2b;
+                color: white;
+                border: 1px solid #555555;
+                padding: 4px;
+                font-size: 14px;
+            }
+            QLabel {
+                color: white;
+            }
+        """)
+
+        # Create central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        # Main layout
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Header
+        self.setup_header(main_layout)
+
+        # Guest Sign In
+        self.setup_guest_section(main_layout)
+
+        # Search bar
+        self.setup_search_section(main_layout)
+
+        # Student list
+        self.setup_student_section(main_layout)
+
+        # Setup keyboard shortcuts
+        self.setup_shortcuts()
+
+    def setup_header(self, parent_layout):
+        """Setup the header section"""
+        self.header_widget = QWidget()
+        self.header_widget.setFixedHeight(HEADER_HEIGHT)
+        self.header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.header_widget.setStyleSheet(f"background-color: {self.header_color};")
+
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(12, 0, 12, 0)
+        header_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        # Logo placeholder
+        self.logo_label = QLabel()
+        logo_size = HEADER_HEIGHT
+        self.logo_label.setFixedSize(logo_size, logo_size)
+        header_layout.addWidget(self.logo_label)
+
+        # Title
+        self.title_label = QLabel("Tap Your Name to Check In")
+        self.title_label.setStyleSheet(f"""
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            background-color: {self.header_color};
+        """)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(self.title_label, 1)
+
+        # Admin button
+        self.setup_admin_button(header_layout)
+
+        parent_layout.addWidget(self.header_widget)
+
+    def setup_guest_section(self, parent_layout):
+        """Setup the guest sign-in section"""
+        guest_widget = QWidget()
+        guest_layout = QHBoxLayout(guest_widget)
+        guest_layout.setContentsMargins(12, 10, 12, 0)
+
+        self.guest_btn = QPushButton("Guest Sign In — Tap to Enter Your Name")
+        self.guest_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #333333;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 12px;
+                border: 2px solid #555555;
+            }
+            QPushButton:hover {
+                background-color: #1A1A1A;
+            }
+        """)
+        self.guest_btn.clicked.connect(self.guest_sign_in)
+        guest_layout.addWidget(self.guest_btn)
+
+        parent_layout.addWidget(guest_widget)
+
+    def setup_search_section(self, parent_layout):
+        """Setup the search section"""
+        search_widget = QWidget()
+        search_layout = QHBoxLayout(search_widget)
+        search_layout.setContentsMargins(12, 3, 12, 3)
+
+        # Search icon
+        search_icon = QLabel("🔍")
+        search_icon.setStyleSheet("font-size: 16px; padding: 4px;")
+        search_layout.addWidget(search_icon)
+
+        # Search input
+        self.search_entry = QLineEdit()
+        self.search_entry.setPlaceholderText("Search for a student...")
+        self.search_entry.setStyleSheet("""
+            QLineEdit {
+                background-color: #2b2b2b;
+                color: white;
+                border: 2px solid #9a9a9a;
+                border-top: 2px solid #9a9a9a;
+                border-left: 2px solid #9a9a9a;
+                border-right: none;
+                border-bottom: none;
+                padding: 8px;
+                font-size: 14px;
+            }
+        """)
+        self.search_entry.textChanged.connect(self.on_search_change)
+        search_layout.addWidget(self.search_entry, 1)
+
+        # Clear button
+        self.clear_btn = QPushButton("Clear")
+        self.clear_btn.setFixedWidth(80)
+        self.clear_btn.clicked.connect(self.clear_search)
+        search_layout.addWidget(self.clear_btn)
+
+        parent_layout.addWidget(search_widget)
+
+    def setup_student_section(self, parent_layout):
+        """Setup the scrollable student list section"""
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                background-color: black;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background-color: #2b2b2b;
+                width: 16px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #555555;
+                border-radius: 8px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #777777;
+            }
+        """)
+
+        # Container for student buttons
+        self.student_widget = QWidget()
+        self.student_layout = QGridLayout(self.student_widget)
+        self.student_layout.setContentsMargins(12, 15, 12, 12)
+        self.student_layout.setSpacing(4)
+
+        self.scroll_area.setWidget(self.student_widget)
+        parent_layout.addWidget(self.scroll_area)
+
+    def setup_admin_button(self, header_layout):
+        """Setup the admin button"""
+        self.admin_btn = QPushButton("Admin")
+        self.admin_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.header_color};
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                border: 2px solid white;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background-color: #1A1A1A;
+            }}
+        """)
+        self.admin_btn.clicked.connect(self.admin_panel)
+        header_layout.addWidget(self.admin_btn)
+
+    def setup_shortcuts(self):
+        """Setup keyboard shortcuts"""
+        # Escape to toggle fullscreen
+        escape_action = QAction(self)
+        escape_action.setShortcut(QKeySequence(Qt.Key.Key_Escape))
+        escape_action.triggered.connect(self.toggle_fullscreen)
+        self.addAction(escape_action)
+
+        # F11 to toggle fullscreen
+        f11_action = QAction(self)
+        f11_action.setShortcut(QKeySequence(Qt.Key.Key_F11))
+        f11_action.triggered.connect(self.toggle_fullscreen)
+        self.addAction(f11_action)
+
     def update_title_with_date(self):
         """Update the title label to include the current date for clarity."""
         try:
             d = self.current_date or datetime.date.today().isoformat()
-            self.title_label.configure(text=("Tap Your Name to Check In"))
+            self.title_label.setText("📌 Tap Your Name to Check In")
         except Exception:
             pass
 
     def schedule_daily_check(self):
         """Schedule the next daily check (non-blocking)."""
-        # Check every 30 seconds; using after keeps it on the main thread safely
-        self.root.after(30 * 1000, self._daily_check)
+        # Check every 30 seconds using QTimer
+        self.daily_timer = QTimer(self)
+        self.daily_timer.timeout.connect(self._daily_check)
+        self.daily_timer.start(30 * 1000)  # 30 seconds
 
     def _daily_check(self):
-        """Check whether the date has rolled over; if so, handle it and reschedule."""
+        """Check whether the date has rolled over; if so, handle it."""
         try:
             today = datetime.date.today().isoformat()
             if today != self.current_date:
                 self.on_day_change(today)
         except Exception as e:
             print("_daily_check error:", e)
-        finally:
-            # Always reschedule
-            try:
-                self.schedule_daily_check()
-            except Exception:
-                pass
 
     def on_day_change(self, new_date_iso):
         """
@@ -671,68 +732,40 @@ class AttendanceApp:
 
     # ---------------- Helpers ----------------
     def setup_fullscreen(self):
-        """Setup fullscreen with Windows 7 compatibility"""
+        """Setup fullscreen with cross-platform compatibility"""
         try:
-            # Try modern fullscreen first
-            self.root.attributes("-fullscreen", True)
-        except tk.TclError:
-            try:
-                # Fallback to zoomed state for Windows 7
-                self.root.state('zoomed')
-            except tk.TclError:
-                # Final fallback - maximize window manually
-                screen_width = self.root.winfo_screenwidth()
-                screen_height = self.root.winfo_screenheight()
-                self.root.geometry("{0}x{1}+0+0".format(screen_width, screen_height))
+            # Start in fullscreen mode
+            self.showFullScreen()
+            self.fullscreen = True
+        except Exception as e:
+            print("Fullscreen setup warning:", e)
 
     def setup_logo(self):
-        """Setup logo with PIL fallback for Windows 7"""
+        """Setup logo with PIL fallback"""
         try:
-            if PIL_AVAILABLE and Image and ImageTk and os.path.exists(self.logo_file):
-                max_logo = HEADER_HEIGHT - 40
+            if PIL_AVAILABLE and Image and os.path.exists(self.logo_file):
+                max_logo = HEADER_HEIGHT
                 img = Image.open(self.logo_file)
                 if RESAMPLE_METHOD:
                     img.thumbnail((max_logo, max_logo), RESAMPLE_METHOD)
                 else:
                     img = img.resize((max_logo, max_logo))
-                self.logo = ImageTk.PhotoImage(img)
-                logo_label = tk.Label(self.header, image=self.logo, bg=self.header_color)
-                logo_label.grid(row=0, column=0, padx=12, sticky="ns")
+                qt_img = ImageQt.ImageQt(img)
+                pixmap = QPixmap.fromImage(qt_img)
+                self.logo_label.setPixmap(pixmap)
             else:
                 raise Exception("Logo not available")
         except Exception as e:
-            print("Logo loading failed: {0}".format(e))
-            logo_label = tk.Label(self.header, text="LOGO", bg=self.header_color, fg="white",
-                                  font=("Arial", 24, "bold"), relief="raised", bd=2)
-            logo_label.grid(row=0, column=0, padx=12, sticky="ns")
-
-    def setup_admin_button(self):
-        """Setup admin button with gear icon fallback"""
-        try:
-            if PIL_AVAILABLE and Image and ImageTk and os.path.exists(GEAR_FILE):
-                gear_icon = Image.open(GEAR_FILE)
-                gear_icon = gear_icon.convert("RGBA")
-                if RESAMPLE_METHOD:
-                    gear_icon.thumbnail((25, 25), RESAMPLE_METHOD)
-                else:
-                    gear_icon = gear_icon.resize((25, 25))
-                self.gear_icon = ImageTk.PhotoImage(gear_icon)
-                self.admin_btn = tk.Button(self.header, image=self.gear_icon, text=" Admin",
-                                           compound="left", command=self.admin_panel,
-                                           bg=self.header_color, fg="white",
-                                           font=("Arial", 14, "bold"), borderwidth=2,
-                                           relief="raised", highlightthickness=2,
-                                           highlightbackground="white")
-            else:
-                raise Exception("Gear icon not available")
-        except Exception as e:
-            print("Gear icon loading failed: {0}".format(e))
-            self.admin_btn = tk.Button(self.header, text="Admin", command=self.admin_panel,
-                                       bg=self.header_color, fg="white",
-                                       font=("Arial", 14, "bold"), borderwidth=2,
-                                       relief="raised", highlightthickness=2,
-                                       highlightbackground="white")
-        self.admin_btn.grid(row=0, column=2, padx=10, sticky="e")
+            print("Logo loading failed:", e)
+            self.logo_label.setText("LOGO")
+            self.logo_label.setStyleSheet(f"""
+                color: white;
+                font-size: 24px;
+                font-weight: bold;
+                background-color: {self.header_color};
+                border: 2px solid white;
+            """)
+            self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _on_mousewheel_windows(self, event):
         try:
@@ -741,100 +774,86 @@ class AttendanceApp:
             pass
 
     def toggle_fullscreen(self, event=None):
-        """Toggle fullscreen with Windows 7 compatibility"""
-        self.fullscreen = not self.fullscreen
-        try:
-            self.root.attributes("-fullscreen", self.fullscreen)
-        except tk.TclError:
-            try:
-                if self.fullscreen:
-                    self.root.state('zoomed')
-                else:
-                    self.root.state('normal')
-            except tk.TclError:
-                if self.fullscreen:
-                    screen_width = self.root.winfo_screenwidth()
-                    screen_height = self.root.winfo_screenheight()
-                    self.root.geometry("{0}x{1}+0+0".format(screen_width, screen_height))
-                else:
-                    self.root.geometry("1024x768+100+100")
+        """Toggle fullscreen mode"""
+        if self.isFullScreen():
+            self.showMaximized()
+            self.fullscreen = False
+        else:
+            self.showFullScreen()
+            self.fullscreen = True
 
     # ---------------- Search ----------------
-    def on_search_change(self, *args):
+    def on_search_change(self):
         """Handle search text changes"""
-        search_text = self.search_var.get().lower().strip()
+        search_text = self.search_entry.text().lower().strip()
         if not search_text or search_text == "search for a student...":
             self.filtered_students = self.students.copy()
         else:
             self.filtered_students = [s for s in self.students if search_text in s.lower()]
         self.build_student_buttons()
 
-    def on_search_focus_in(self, event):
-        """Handle search entry focus in"""
-        if self.search_entry.get() == "Search for a student...":
-            self.search_entry.delete(0, tk.END)
-            # Use white text when the user types
-            self.search_entry.configure(fg="white")
-
-    def on_search_focus_out(self, event):
-        """Handle search entry focus out"""
-        if not self.search_entry.get():
-            self.search_entry.insert(0, "Search for a student...")
-            self.search_entry.configure(fg="gray")
-
     def clear_search(self):
         """Clear search and show all students"""
-        self.search_var.set("")
-        self.search_entry.delete(0, tk.END)
-        self.search_entry.insert(0, "Search for a student...")
-        self.search_entry.configure(fg="gray")
+        self.search_entry.clear()
+        self.search_entry.setPlaceholderText("Search for a student...")
         self.filtered_students = self.students.copy()
         self.build_student_buttons()
 
     # ---------------- Student Buttons ----------------
     def build_student_buttons(self):
         """Build student buttons grid using filtered students list"""
-        for widget in self.student_frame.winfo_children():
-            widget.destroy()
+        # Clear existing buttons
+        for i in reversed(range(self.student_layout.count())):
+            widget = self.student_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
 
         today = datetime.date.today().isoformat()
         sorted_students = sorted(self.filtered_students, key=str.lower)
         COLS = 3
 
-        for c in range(COLS):
-            self.student_frame.grid_columnconfigure(c, weight=1)
-
         if not sorted_students:
-            no_results = tk.Label(self.student_frame, text="No students found matching your search",
-                                  bg="black", fg="white", font=("Arial", 16))
-            no_results.grid(row=0, column=0, columnspan=COLS, pady=50)
+            no_results = QLabel("No students found matching your search")
+            no_results.setStyleSheet("""
+                color: white;
+                font-size: 16px;
+                padding: 50px;
+            """)
+            no_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.student_layout.addWidget(no_results, 0, 0, 1, COLS)
             return
 
         row, col = 0, 0
         # Choose a slightly smaller height when fullscreen
-        btn_height = 3 if self.fullscreen else 2
+        btn_height = 80 if self.fullscreen else 60
 
         for name in sorted_students:
             checked = already_checked_in(name, today)
             # plain name (no emoji/checkmark). When checked, persistently show #326B20
             bg_color = "#326B20" if checked else "#333333"
-            btn = tk.Button(self.student_frame, text=name, width=20, height=btn_height,
-                            command=lambda n=name: self.checkin(n),
-                            bg=bg_color, fg="white",
-                            font=("Arial", 14, "bold"), relief="raised", bd=3,
-                            activebackground="#1A1A1A", activeforeground="white",
-                            wraplength=150)
-            btn.grid(row=row, column=col, padx=12, pady=4, sticky="nsew")
-            self.student_frame.grid_rowconfigure(row, weight=1)
+            btn = QPushButton(name)
+            btn.setFixedHeight(btn_height)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {bg_color};
+                    color: white;
+                    font-size: 14px;
+                    font-weight: bold;
+                    border: 3px solid #555555;
+                    padding: 8px;
+                }}
+                QPushButton:hover {{
+                    background-color: #1A1A1A;
+                }}
+                QPushButton:pressed {{
+                    background-color: #000000;
+                }}
+            """)
+            btn.clicked.connect(lambda checked, n=name: self.checkin(n))
+            self.student_layout.addWidget(btn, row, col)
             col += 1
             if col >= COLS:
                 col, row = 0, row + 1
-
-        # After building buttons, update scrollregion
-        try:
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        except Exception:
-            pass
 
     def checkin(self, name):
         """Handle student check-in (toggle) without popups"""
@@ -844,11 +863,13 @@ class AttendanceApp:
 
     def guest_sign_in(self):
         """Handle guest sign-in (no popups)"""
-        name = simpledialog.askstring("Guest Sign In", "Enter your name:")
-        if not name or not name.strip():
+        name, ok = QInputDialog.getText(self, "Guest Sign In", "Enter your name:")
+        if not ok or not name or not name.strip():
             return
         name = name.strip()
-        email = simpledialog.askstring("Guest Email (optional)", "Enter email (optional):")
+        email, ok = QInputDialog.getText(self, "Guest Email (optional)", "Enter email (optional):")
+        if not ok:
+            email = ""
         email = (email.strip() if email and email.strip() else "")
 
         # Append to guests CSV
@@ -901,552 +922,212 @@ class AttendanceApp:
     # ---------------- Admin Panel ----------------
     def admin_panel(self):
         """Open admin panel"""
-        pin = simpledialog.askstring("Admin Login", "Enter Admin PIN:", show="*")
-        if pin != self.admin_pin:
-            messagebox.showerror("Error", "Wrong PIN")
+        pin, ok = QInputDialog.getText(self, "Admin Login", "Enter Admin PIN:", QLineEdit.EchoMode.Password)
+        if not ok or pin != self.admin_pin:
+            QMessageBox.critical(self, "Error", "Wrong PIN")
             return
 
-        admin_win = tk.Toplevel(self.root)
-        admin_win.title("Admin Panel")
-        admin_win.geometry("900x700")
-        admin_win.configure(bg="black")
+        # Create admin dialog
+        self.admin_dialog = QDialog(self)
+        self.admin_dialog.setWindowTitle("Admin Panel")
+        self.admin_dialog.setFixedSize(900, 700)
+        self.admin_dialog.setStyleSheet("background-color: black; color: white;")
 
-        # make modal-like
-        admin_win.transient(self.root)
-        admin_win.grab_set()
+        layout = QVBoxLayout(self.admin_dialog)
 
-        notebook = ttk.Notebook(admin_win)
-        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        # Create tab widget
+        self.admin_tabs = QTabWidget()
+        self.admin_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #555555;
+                background-color: black;
+            }
+            QTabBar::tab {
+                background-color: #333333;
+                color: white;
+                padding: 8px 16px;
+                border: 1px solid #555555;
+            }
+            QTabBar::tab:selected {
+                background-color: #5D3FD3;
+            }
+        """)
+        layout.addWidget(self.admin_tabs)
 
-        # Tabs
-        self.setup_attendance_tab(notebook)
-        # Guests admin tab (shows guest sign-ins)
-        self.setup_guests_tab(notebook)
-        self.setup_students_tab(notebook)
-        # Backup settings now live in their own tab
-        self.setup_backup_tab(notebook)
-        self.setup_settings_tab(notebook)
-        self.setup_help_tab(notebook)
+        # Setup tabs
+        self.setup_attendance_tab()
+        self.setup_guests_tab()
+        self.setup_students_tab()
+        self.setup_backup_tab()
+        self.setup_settings_tab()
+        self.update_settings_labels()
+        self.update_backup_labels()
 
-    def setup_attendance_tab(self, notebook):
-        # Use a dark background for the attendance viewer
-        frame = tk.Frame(notebook, bg="black")
-        notebook.add(frame, text="Attendance")
-        admin_window = notebook.master
+        self.admin_dialog.exec()
 
-        # Treeview + scrollbars (container uses black to match request)
-        tree_frame = tk.Frame(frame, bg="black")
-        tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    def update_backup_labels(self):
+        """Update backup tab labels"""
+        if hasattr(self, 'backup_path_label'):
+            self.backup_path_label.setText(self.backup_location or "Not set")
+        if hasattr(self, 'backup_status_label'):
+            self.backup_status_label.setText(f"Last backup: {self.last_backup}" if self.last_backup else "Last backup: Never")
 
-        # Configure a Treeview style for dark background rows/fields
-        try:
-            style = ttk.Style()
-            try:
-                style.theme_use('default')
-            except Exception:
-                pass
-            style.configure("Black.Treeview", background="black", fieldbackground="black", foreground="white")
-            style.configure("Black.Treeview.Heading", background=self.header_color, foreground="white")
-            style.map("Black.Treeview", background=[('selected', self.header_color)], foreground=[('selected', 'white')])
-        except Exception:
-            # If style setup fails, continue with defaults
-            pass
+    def update_settings_labels(self):
+        """Update settings tab labels with current paths"""
+        if hasattr(self, 'csv_path_label'):
+            self.csv_path_label.setText(get_csv_file())
+        if hasattr(self, 'students_path_label'):
+            self.students_path_label.setText(get_students_file())
+        if hasattr(self, 'guests_path_label'):
+            self.guests_path_label.setText(get_guests_file())
 
-        cols = ("Date", "Name", "Status")
-        # Apply the dark style if available
-        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=15, style="Black.Treeview")
-        for col in cols:
-            tree.heading(col, text=col)
-            tree.column(col, width=150, anchor="center")
+    def setup_attendance_tab(self):
+        """Setup the attendance tab with a table view"""
+        frame = QWidget()
+        self.admin_tabs.addTab(frame, "Attendance")
 
-        v_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-        h_scrollbar = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        layout = QVBoxLayout(frame)
 
-        tree.grid(row=0, column=0, sticky="nsew")
-        v_scrollbar.grid(row=0, column=1, sticky="ns")
-        h_scrollbar.grid(row=1, column=0, sticky="ew")
-
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+        # Table widget
+        self.attendance_table = QTableWidget()
+        self.attendance_table.setColumnCount(3)
+        self.attendance_table.setHorizontalHeaderLabels(["Date", "Name", "Status"])
+        self.attendance_table.setStyleSheet("""
+            QTableWidget {
+                background-color: black;
+                color: white;
+                gridline-color: #555555;
+            }
+            QHeaderView::section {
+                background-color: #5D3FD3;
+                color: white;
+                padding: 4px;
+                border: 1px solid #555555;
+            }
+            QTableWidget::item {
+                background-color: black;
+                color: white;
+                border: 1px solid #555555;
+            }
+            QTableWidget::item:selected {
+                background-color: #5D3FD3;
+            }
+        """)
+        self.attendance_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.attendance_table)
 
         # Load attendance data
-        global attendance_data
-        for row in attendance_data:
-            tree.insert("", "end", values=(
-                row.get("Date", ""),
-                row.get("Name", ""),
-                row.get("Status", "")
-            ))
+        self.refresh_attendance_table()
 
-        btn_frame = tk.Frame(frame, bg="black")
-        btn_frame.pack(pady=10, fill="x", padx=10)
+        # Buttons
+        btn_layout = QHBoxLayout()
 
-        tk.Button(btn_frame, text="Download CSV", command=self.download_csv,
-                  bg="green", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="left", padx=5)
+        download_btn = QPushButton("Download CSV")
+        download_btn.clicked.connect(self.download_csv)
+        btn_layout.addWidget(download_btn)
 
-        tk.Button(btn_frame, text="Refresh", command=lambda: self.refresh_attendance_tree(tree),
-                  bg="blue", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="left", padx=5)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh_attendance_table)
+        btn_layout.addWidget(refresh_btn)
 
-        tk.Button(btn_frame, text="Close", command=lambda: admin_window.destroy(),
-                  bg="red", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="right", padx=5)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.admin_dialog.close)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
 
-    def setup_guests_tab(self, notebook):
-        """Admin tab to view guest sign-ins (Date, Name, Email)"""
-        frame = tk.Frame(notebook, bg="black")
-        notebook.add(frame, text="Guests")
-        admin_window = notebook.master
+        layout.addLayout(btn_layout)
 
-        tree_frame = tk.Frame(frame, bg="black")
-        tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    def setup_guests_tab(self):
+        """Setup the guests tab with a table view"""
+        frame = QWidget()
+        self.admin_tabs.addTab(frame, "Guests")
 
-        try:
-            style = ttk.Style()
-            try:
-                style.theme_use('default')
-            except Exception:
-                pass
-            style.configure("Black.Treeview", background="black", fieldbackground="black", foreground="white")
-            style.configure("Black.Treeview.Heading", background=self.header_color, foreground="white")
-            style.map("Black.Treeview", background=[('selected', self.header_color)], foreground=[('selected', 'white')])
-        except Exception:
-            pass
+        layout = QVBoxLayout(frame)
 
-        cols = ("Date", "Name", "Email")
-        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=15, style="Black.Treeview")
-        for col in cols:
-            tree.heading(col, text=col)
-            tree.column(col, width=150, anchor="center")
-
-        v_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-        h_scrollbar = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
-
-        tree.grid(row=0, column=0, sticky="nsew")
-        v_scrollbar.grid(row=0, column=1, sticky="ns")
-        h_scrollbar.grid(row=1, column=0, sticky="ew")
-
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+        # Table widget
+        self.guests_table = QTableWidget()
+        self.guests_table.setColumnCount(3)
+        self.guests_table.setHorizontalHeaderLabels(["Date", "Name", "Email"])
+        self.guests_table.setStyleSheet("""
+            QTableWidget {
+                background-color: black;
+                color: white;
+                gridline-color: #555555;
+            }
+            QHeaderView::section {
+                background-color: #5D3FD3;
+                color: white;
+                padding: 4px;
+                border: 1px solid #555555;
+            }
+            QTableWidget::item {
+                background-color: black;
+                color: white;
+                border: 1px solid #555555;
+            }
+            QTableWidget::item:selected {
+                background-color: #5D3FD3;
+            }
+        """)
+        self.guests_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.guests_table)
 
         # Load guest data
-        try:
-            self.refresh_guests_tree(tree)
-        except Exception as e:
-            print("Error loading guests data:", e)
-            tree.insert("", "end", values=("Error", "Could not load data", "Check file"))
+        self.refresh_guests_table()
 
-        btn_frame = tk.Frame(frame, bg="black")
-        btn_frame.pack(pady=10, fill="x", padx=10)
+        # Buttons
+        btn_layout = QHBoxLayout()
 
-        def download_guests():
-            guests_file = get_guests_file()
-            try:
-                file_path = filedialog.asksaveasfilename(
-                    defaultextension=".csv",
-                    filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-                    title="Save Guests CSV"
-                )
-                if file_path:
-                    import shutil
-                    shutil.copy2(guests_file, file_path)
-                    messagebox.showinfo("Success", "Guests CSV saved to:\n{0}".format(file_path))
-            except Exception as e:
-                messagebox.showerror("Error", "Failed to save Guests CSV: {0}".format(e))
+        download_btn = QPushButton("Download CSV")
+        download_btn.clicked.connect(self.download_guests_csv)
+        btn_layout.addWidget(download_btn)
 
-        tk.Button(btn_frame, text="Download CSV", command=download_guests,
-                  bg="green", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="left", padx=5)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh_guests_table)
+        btn_layout.addWidget(refresh_btn)
 
-        tk.Button(btn_frame, text="Refresh", command=lambda: self.refresh_guests_tree(tree),
-                  bg="blue", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="left", padx=5)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.admin_dialog.close)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
 
-        tk.Button(btn_frame, text="Close", command=lambda: admin_window.destroy(),
-                  bg="red", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="right", padx=5)
-
-    def setup_students_tab(self, notebook):
-        frame = tk.Frame(notebook, bg="black")
-        notebook.add(frame, text="Students")
-        admin_window = notebook.master
-
-        list_frame = tk.Frame(frame, bg="black")
-        list_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        tk.Label(list_frame, text="Current Students:", bg="black", fg="white",
-                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 5))
-
-        list_container = tk.Frame(list_frame, bg="black")
-        list_container.pack(fill="both", expand=True)
-
-        # Dark-themed listbox so the Students admin tab matches the Attendance viewer
-        self.students_listbox = tk.Listbox(list_container, font=("Arial", 12),
-                                          selectmode=tk.SINGLE, height=15,
-                                          bg="black", fg="white",
-                                          selectbackground=self.header_color,
-                                          selectforeground="white",
-                                          highlightthickness=0, bd=0)
-        list_scrollbar = ttk.Scrollbar(list_container, orient="vertical",
-                                       command=self.students_listbox.yview)
-        self.students_listbox.configure(yscrollcommand=list_scrollbar.set)
-
-        self.students_listbox.pack(side="left", fill="both", expand=True)
-        list_scrollbar.pack(side="right", fill="y")
-
-        self.refresh_students_listbox()
-
-        btn_frame = tk.Frame(frame, bg="black")
-        btn_frame.pack(pady=10, fill="x", padx=10)
-
-        tk.Button(btn_frame, text="Add Student", command=self.add_student,
-                  bg="green", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Edit Student", command=self.edit_student,
-                  bg="orange", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Delete Student", command=self.delete_student,
-                  bg="red", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Close", command=lambda: admin_window.destroy(),
-                  bg="darkred", fg="white", font=("Arial", 12, "bold"),
-                  relief="raised", bd=2).pack(side="right", padx=5)
-
-    def setup_backup_tab(self, notebook):
-        """Separate Backup tab so backup controls have their own page."""
-        frame = tk.Frame(notebook, bg="black")
-        notebook.add(frame, text="Backup")
-        admin_window = notebook.master
-
-        main_frame = tk.Frame(frame, bg="black")
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # Backup folder section
-        folder_frame = tk.LabelFrame(main_frame, text="Backup Folder", bg="black",
-                                     font=("Arial", 12, "bold"), fg="#5D3FD3")
-        folder_frame.pack(fill="x", pady=(0, 20))
-
-        cur_name = os.path.basename(self.backup_location) if self.backup_location else "Not set"
-        tk.Label(folder_frame, text="Current Backup Folder: {0}".format(cur_name),
-                 bg="black", fg="white", font=("Arial", 11)).pack(pady=6)
-
-        self._backup_path_label = tk.Label(folder_frame, text="Path: {0}".format(self.backup_location or "(not configured)"),
-                                           bg="black", fg="lightgray", font=("Arial", 9), wraplength=700, justify="left")
-        self._backup_path_label.pack(pady=(0, 8))
-
-        tk.Button(folder_frame, text="Change Backup Folder", command=lambda: self.change_backup_location(self._backup_path_label),
-                  bg="blue", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
-
-        # Backup now section
-        now_frame = tk.LabelFrame(main_frame, text="Backup Now", bg="black",
-                                  font=("Arial", 12, "bold"), fg="#5D3FD3")
-        now_frame.pack(fill="x", pady=(0, 20))
-
-        tk.Label(now_frame, text="Run an immediate backup of attendance, students, guests, config and assets.",
-                 bg="black", fg="lightgray", font=("Arial", 10), wraplength=700, justify="left").pack(pady=(6, 8))
-
-        tk.Button(now_frame, text="Backup Now", command=lambda: self.perform_backup(notify=True),
-                  bg="green", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
-
-        # Hourly backups section
-        hourly_frame = tk.LabelFrame(main_frame, text="Hourly Backups", bg="black",
-                                     font=("Arial", 12, "bold"), fg="#5D3FD3")
-        hourly_frame.pack(fill="x", pady=(0, 20))
-
-        self.backup_status_label = tk.Label(hourly_frame, text=("Last backup: None" if not self.last_backup else str(self.last_backup)),
-                                            bg="black", fg="white", font=("Arial", 10))
-        self.backup_status_label.pack(anchor="w", pady=(6, 8), padx=6)
-
-        def _toggle_backups():
-            if getattr(self, 'backup_job', None):
-                self.stop_backups()
-                toggle_btn.configure(text="Start Hourly Backups")
-                try:
-                    self.backup_status_label.configure(text="Backups stopped")
-                except Exception:
-                    pass
-            else:
-                if not self.backup_location:
-                    messagebox.showwarning("Backup", "Please choose a backup folder first")
-                    return
-                self.start_backups()
-                toggle_btn.configure(text="Stop Hourly Backups")
-                try:
-                    self.backup_status_label.configure(text=("Last backup: {0}".format(self.last_backup) if self.last_backup else "Backups running"))
-                except Exception:
-                    pass
-
-        toggle_btn = tk.Button(hourly_frame, text=("Stop Hourly Backups" if self.backup_enabled else "Start Hourly Backups"),
-                               command=_toggle_backups,
-                               bg="orange", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2)
-        toggle_btn.pack(pady=5)
-
-        # Close button
-        close_frame = tk.Frame(main_frame, bg="black")
-        close_frame.pack(fill="x", pady=(10, 0))
-        tk.Button(close_frame, text="Close", command=lambda: admin_window.destroy(),
-                  bg="red", fg="white", font=("Arial", 12, "bold"), relief="raised", bd=2).pack()
-
-    def setup_settings_tab(self, notebook):
-       settings_frame = tk.Frame(notebook, bg="black")
-       notebook.add(settings_frame, text="Settings")
-       admin_window = notebook.master
-
-       # Scrollable settings area: canvas + inner frame so long settings pages can scroll
-       container_canvas = tk.Canvas(settings_frame, bg="black", highlightthickness=0)
-       vsb = ttk.Scrollbar(settings_frame, orient="vertical", command=container_canvas.yview)
-       container_canvas.configure(yscrollcommand=vsb.set)
-       vsb.pack(side="right", fill="y")
-       container_canvas.pack(side="left", fill="both", expand=True, padx=0, pady=0)
-
-       inner_frame = tk.Frame(container_canvas, bg="black")
-       # create window to hold inner_frame with a small left padding
-       left_pad = 10
-       win_id = container_canvas.create_window((left_pad, 0), window=inner_frame, anchor="nw")
-
-       # ensure inner_frame width follows the canvas width (so content stretches and sits close to scrollbar)
-       def _on_canvas_configure(event):
-           try:
-               # reduce width by scrollbar width + left padding + small margin
-               sb_width = vsb.winfo_width() if vsb.winfo_ismapped() else 16
-               new_w = max(100, event.width - sb_width - left_pad - 4)
-               container_canvas.itemconfig(win_id, width=new_w)
-           except Exception:
-               pass
-
-       container_canvas.bind("<Configure>", _on_canvas_configure)
-
-       # expose inner_frame as main_container so existing code can use it
-       main_container = inner_frame
-
-       # keep canvas scrollregion updated when inner content changes
-       def _on_configure(event):
-           try:
-               container_canvas.configure(scrollregion=container_canvas.bbox("all"))
-           except Exception:
-               pass
-
-       inner_frame.bind("<Configure>", _on_configure)
-
-       # Mouse wheel scrolling when pointer is over the canvas
-       def _on_mousewheel(event):
-           # Windows: event.delta is multiple of 120
-           try:
-               container_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-           except Exception:
-               pass
-
-       container_canvas.bind("<MouseWheel>", _on_mousewheel)
-       # For Linux systems with button 4/5 wheel events
-       container_canvas.bind("<Button-4>", lambda e: container_canvas.yview_scroll(-1, "units"))
-       container_canvas.bind("<Button-5>", lambda e: container_canvas.yview_scroll(1, "units"))
-
-       # Bind mouse wheel when the pointer is over the settings inner frame
-       # This mirrors the Help tab behavior: scrolling works while the cursor
-       # is over the content area and stops when it leaves.
-       def _bind_mousewheel(event):
-           try:
-               container_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-               container_canvas.bind_all("<Button-4>", lambda e: container_canvas.yview_scroll(-1, "units"))
-               container_canvas.bind_all("<Button-5>", lambda e: container_canvas.yview_scroll(1, "units"))
-           except Exception:
-               pass
-
-       def _unbind_mousewheel(event):
-           try:
-               container_canvas.unbind_all("<MouseWheel>")
-               container_canvas.unbind_all("<Button-4>")
-               container_canvas.unbind_all("<Button-5>")
-           except Exception:
-               pass
-
-       inner_frame.bind("<Enter>", _bind_mousewheel)
-       inner_frame.bind("<Leave>", _unbind_mousewheel)
-
-       pin_frame = tk.LabelFrame(main_container, text="Admin PIN", bg="black",
-                           font=("Arial", 12, "bold"), fg="#5D3FD3")
-       pin_frame.pack(fill="x", pady=(0, 20))
-
-       tk.Label(pin_frame, text="Current PIN: " + "*" * len(self.admin_pin),
-              bg="black", fg="white", font=("Arial", 11)).pack(pady=10)
-       tk.Button(pin_frame, text="Change PIN", command=self.change_admin_pin,
-               bg="blue", fg="white", font=("Arial", 11, "bold"),
-               relief="raised", bd=2).pack(pady=5)
-
-       # CSV File Location Section
-       csv_frame = tk.LabelFrame(main_container, text="CSV File Location", bg="black",
-                           font=("Arial", 12, "bold"), fg="#5D3FD3")
-       csv_frame.pack(fill="x", pady=(0, 20))
-
-       current_csv_label = tk.Label(csv_frame, text="Current CSV: {0}".format(os.path.basename(self.csv_file)),
-                              bg="black", fg="white", font=("Arial", 11))
-       current_csv_label.pack(pady=10)
-
-       csv_path_label = tk.Label(csv_frame, text="Path: {0}".format(self.csv_file),
-                           bg="black", fg="lightgray", font=("Arial", 9))
-       csv_path_label.pack(pady=(0, 10))
-
-       tk.Button(csv_frame, text="Change CSV Location", command=self.change_csv_location,
-               bg="blue", fg="white", font=("Arial", 11, "bold"),
-               relief="raised", bd=2).pack(pady=5)
-
-       tk.Button(csv_frame, text="Import Attendance Data", command=self.import_attendance_data,
-               bg="green", fg="white", font=("Arial", 11, "bold"),
-               relief="raised", bd=2).pack(pady=5)
-
-       # Students File Location Section
-       students_frame = tk.LabelFrame(main_container, text="Students File Location", bg="black",
-                                font=("Arial", 12, "bold"), fg="#5D3FD3")
-       students_frame.pack(fill="x", pady=(0, 20))
-
-       students_path = get_students_file()
-       tk.Label(students_frame, text="Current Students: {0}".format(os.path.basename(students_path)),
-              bg="black", fg="white", font=("Arial", 11)).pack(pady=6)
-       tk.Label(students_frame, text="Path: {0}".format(students_path),
-              bg="black", fg="lightgray", font=("Arial", 9)).pack(pady=(0, 8))
-       tk.Button(students_frame, text="Change Students Location", command=self.change_students_location,
-               bg="blue", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
-
-       tk.Button(students_frame, text="Import Students Data", command=self.import_students_data,
-               bg="green", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
-
-       # Guests File Location Section
-       guests_frame = tk.LabelFrame(main_container, text="Guests File Location", bg="black",
-                              font=("Arial", 12, "bold"), fg="#5D3FD3")
-       guests_frame.pack(fill="x", pady=(0, 20))
-
-       guests_path = get_guests_file()
-       tk.Label(guests_frame, text="Current Guests CSV: {0}".format(os.path.basename(guests_path)),
-              bg="black", fg="white", font=("Arial", 11)).pack(pady=6)
-       tk.Label(guests_frame, text="Path: {0}".format(guests_path),
-              bg="black", fg="lightgray", font=("Arial", 9)).pack(pady=(0, 8))
-       tk.Button(guests_frame, text="Change Guests Location", command=self.change_guests_location,
-               bg="blue", fg="white", font=("Arial", 11, "bold"), relief="raised", bd=2).pack(pady=5)
-
-
-
-       logo_frame = tk.LabelFrame(main_container, text="Logo Settings", bg="black",
-                            font=("Arial", 12, "bold"), fg="#5D3FD3")
-       logo_frame.pack(fill="x", pady=(0, 20))
-
-       tk.Label(logo_frame, text="Current logo: {0}".format(os.path.basename(self.logo_file)),
-              bg="black", fg="white", font=("Arial", 11)).pack(pady=10)
-       tk.Button(logo_frame, text="Choose Logo", command=self.change_logo,
-               bg="blue", fg="white", font=("Arial", 11, "bold"),
-               relief="raised", bd=2).pack(pady=5)
-
-       color_frame = tk.LabelFrame(main_container, text="Appearance", bg="black",
-                            font=("Arial", 12, "bold"), fg="#5D3FD3")
-       color_frame.pack(fill="x", pady=(0, 20))
-
-       color_display = tk.Label(color_frame, text="Current header color",
-                           bg=self.header_color, fg="white", font=("Arial", 11, "bold"),
-                           relief="sunken", bd=2, width=20, height=2)
-       color_display.pack(pady=10)
-       tk.Button(color_frame, text="Choose Color", command=self.change_header_color,
-               bg="blue", fg="white", font=("Arial", 11, "bold"),
-               relief="raised", bd=2).pack(pady=5)
-
-       close_frame = tk.Frame(main_container, bg="black")
-       close_frame.pack(fill="x", pady=(20, 0))
-       tk.Button(close_frame, text="Close", command=lambda: admin_window.destroy(),
-               bg="red", fg="white", font=("Arial", 12, "bold"),
-               relief="raised", bd=2).pack()
-
-    def setup_help_tab(self, notebook):
-      help_frame = tk.Frame(notebook, bg="black")
-      notebook.add(help_frame, text="Help")
-      admin_window = notebook.master
-
-      title_frame = tk.Frame(help_frame, bg="black")
-      title_frame.pack(fill="x", padx=20, pady=(20, 10))
-
-      tk.Label(title_frame, text="Attendance System Help", bg="black", fg="white",
-           font=("Arial", 18, "bold")).pack()
-
-      text_frame = tk.Frame(help_frame, bg="black")
-      text_frame.pack(fill="both", expand=True, padx=20, pady=10)
-
-      text_widget = tk.Text(text_frame, wrap="word", font=("Arial", 11),
-                bg="black", fg="white", relief="flat",
-                borderwidth=0, padx=10, pady=10)
-      scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
-      text_widget.configure(yscrollcommand=scrollbar.set)
-
-      help_text = """How to Use:
-Tap a student name to mark them Present
-Tap again to remove them from today's attendance
-Use Guest Sign-In for visitors or unlisted students
-Press Escape or F11 to toggle fullscreen mode
-
-Admin Features:
-View and download attendance records as CSV
-Add, edit, or remove students from the system
-Change admin PIN for security
-Customize CSV file location and name
-Customize logo and header colors
-Access help and system information
-
-File Locations:
-Attendance data: Configurable (default: data/attendance.csv)
-Student list: data/students.json
-Configuration: data/config.json
-Assets: assets/ folder
-
-Windows 7 & Python 3.8 Compatibility:
-Works with Python 3.8.0 and newer
-Fallback modes for image loading
-Compatible with older tkinter versions
-Handles encoding issues gracefully
-
-Keyboard Shortcuts:
-Escape: Toggle fullscreen
-F11: Toggle fullscreen"""
-
-      text_widget.insert("1.0", help_text)
-      text_widget.configure(state="disabled")
-
-      text_widget.pack(side="left", fill="both", expand=True)
-      scrollbar.pack(side="right", fill="y")
-
-      btn_frame = tk.Frame(help_frame, bg="black")
-      btn_frame.pack(fill="x", padx=20, pady=20)
-
-      btn_frame.grid_columnconfigure(0, weight=1)
-      btn_frame.grid_columnconfigure(1, weight=0)
-      btn_frame.grid_columnconfigure(2, weight=0)
-      btn_frame.grid_columnconfigure(3, weight=0)
-      btn_frame.grid_columnconfigure(4, weight=1)
-
-      tk.Button(btn_frame, text="Open GitHub Repository",
-          command=self.open_github,
-          bg="blue", fg="white", font=("Arial", 12, "bold"),
-          relief="raised", bd=2, width=25).grid(row=0, column=1, padx=10)
-
-      tk.Button(btn_frame, text="System Info",
-          command=self.show_system_info,
-          bg="gray", fg="white", font=("Arial", 12, "bold"),
-          relief="raised", bd=2).grid(row=0, column=2, padx=10)
-
-      tk.Button(btn_frame, text="Close",
-          command=lambda: admin_window.destroy(),
-          bg="red", fg="white", font=("Arial", 12, "bold"),
-          relief="raised", bd=2).grid(row=0, column=3, padx=10)
+        layout.addLayout(btn_layout)
 
     # ---------------- Utilities ----------------
-    def refresh_attendance_tree(self, tree):
+    def refresh_attendance_table(self):
+        """Refresh the attendance table with current data"""
         global attendance_data
-        for item in tree.get_children():
-            tree.delete(item)
-        for row in attendance_data:
-            tree.insert("", "end", values=(
-                row.get("Date", ""),
-                row.get("Name", ""),
-                row.get("Status", "")
-            ))
+        self.attendance_table.setRowCount(len(attendance_data))
+        for row_idx, row_data in enumerate(reversed(attendance_data)):
+            self.attendance_table.setItem(row_idx, 0, QTableWidgetItem(row_data.get("Date", "")))
+            self.attendance_table.setItem(row_idx, 1, QTableWidgetItem(row_data.get("Name", "")))
+            self.attendance_table.setItem(row_idx, 2, QTableWidgetItem(row_data.get("Status", "")))
+
+    def refresh_guests_table(self):
+        """Refresh the guests table with current data"""
+        global guests_data
+        self.guests_table.setRowCount(len(guests_data))
+        for row_idx, row_data in enumerate(guests_data):
+            self.guests_table.setItem(row_idx, 0, QTableWidgetItem(row_data.get("Date", "")))
+            self.guests_table.setItem(row_idx, 1, QTableWidgetItem(row_data.get("Name", "")))
+            self.guests_table.setItem(row_idx, 2, QTableWidgetItem(row_data.get("Email", "")))
+
+    def download_guests_csv(self):
+        """Download guests CSV file"""
+        guests_file = get_guests_file()
+        try:
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Guests CSV",
+                "",
+                "CSV files (*.csv);;All files (*.*)"
+            )
+            if file_path:
+                import shutil
+                shutil.copy2(guests_file, file_path)
+                QMessageBox.information(self, "Success", f"Guests CSV saved to:\n{file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save Guests CSV: {e}")
 
     def refresh_guests_tree(self, tree):
         """Populate a Treeview with guest sign-in rows from the guests CSV"""
@@ -1460,10 +1141,579 @@ F11: Toggle fullscreen"""
                 row.get("Email", "")
             ))
 
-    def refresh_students_listbox(self):
-        self.students_listbox.delete(0, tk.END)
-        for student in self.students:
-            self.students_listbox.insert(tk.END, student)
+    def setup_students_tab(self):
+        """Setup the students tab"""
+        frame = QWidget()
+        self.admin_tabs.addTab(frame, "Students")
+        layout = QVBoxLayout(frame)
+
+        # List widget for students
+        self.students_list = QListWidget()
+        self.students_list.setStyleSheet("""
+            QListWidget {
+                background-color: black;
+                color: white;
+                border: 1px solid #555555;
+            }
+            QListWidget::item {
+                background-color: black;
+                color: white;
+                padding: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: #5D3FD3;
+            }
+        """)
+        layout.addWidget(self.students_list)
+
+        # Load students
+        self.refresh_students_list()
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        add_btn = QPushButton("Add Student")
+        add_btn.clicked.connect(self.add_student_pyqt)
+        btn_layout.addWidget(add_btn)
+
+        edit_btn = QPushButton("Edit Student")
+        edit_btn.clicked.connect(self.edit_student_pyqt)
+        btn_layout.addWidget(edit_btn)
+
+        delete_btn = QPushButton("Delete Student")
+        delete_btn.clicked.connect(self.delete_student_pyqt)
+        btn_layout.addWidget(delete_btn)
+
+        import_btn = QPushButton("Import Students")
+        import_btn.clicked.connect(self.import_students_data_pyqt)
+        btn_layout.addWidget(import_btn)
+
+        layout.addLayout(btn_layout)
+
+    def refresh_students_list(self):
+        """Refresh the students list widget"""
+        self.students_list.clear()
+        for student in sorted(self.students, key=str.lower):
+            self.students_list.addItem(student)
+
+    def add_student_pyqt(self):
+        """Add a new student using PyQt dialogs"""
+        name, ok = QInputDialog.getText(self, "Add Student", "Enter student name:")
+        if ok and name and name.strip():
+            name = name.strip()
+            if name not in self.students:
+                self.students.append(name)
+                if save_students(self.students):
+                    self.students.sort(key=str.lower)
+                    self.refresh_students_list()
+                    self.on_search_change()  # Update main view
+                    QMessageBox.information(self, "Success", f"Student '{name}' added successfully!")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to save student data")
+            else:
+                QMessageBox.warning(self, "Warning", f"Student '{name}' already exists!")
+
+    def edit_student_pyqt(self):
+        """Edit selected student"""
+        current_item = self.students_list.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "Warning", "Please select a student to edit")
+            return
+
+        old_name = current_item.text()
+        new_name, ok = QInputDialog.getText(self, "Edit Student", "Edit name:", text=old_name)
+        if ok and new_name and new_name.strip() and new_name.strip() != old_name:
+            new_name = new_name.strip()
+            if new_name not in self.students:
+                index = self.students.index(old_name)
+                self.students[index] = new_name
+                if save_students(self.students):
+                    self.refresh_students_list()
+                    self.on_search_change()  # Update main view
+                    QMessageBox.information(self, "Success", f"Student renamed to '{new_name}'!")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to save student data")
+            else:
+                QMessageBox.warning(self, "Warning", f"Student '{new_name}' already exists!")
+
+    def delete_student_pyqt(self):
+        """Delete selected student"""
+        current_item = self.students_list.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "Warning", "Please select a student to delete")
+            return
+
+        name = current_item.text()
+        reply = QMessageBox.question(self, "Confirm Delete", 
+                                   f"Delete student '{name}'?\nThis cannot be undone.",
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self.students.remove(name)
+            if save_students(self.students):
+                self.refresh_students_list()
+                self.on_search_change()  # Update main view
+                QMessageBox.information(self, "Success", f"Student '{name}' deleted!")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save student data")
+
+    def import_students_data_pyqt(self):
+        """Import students data from a JSON file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Students JSON to Import",
+            "",
+            "JSON files (*.json);;All files (*.*)"
+        )
+        if not file_path:
+            return
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                imported_students = json.load(f)
+            
+            if not isinstance(imported_students, list):
+                QMessageBox.critical(self, "Error", "Invalid JSON format. Expected a list of students.")
+                return
+            
+            reply = QMessageBox.question(self, "Confirm Import", 
+                                       f"Import {len(imported_students)} students? This will replace current student list.",
+                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                if save_students(imported_students):
+                    self.students = imported_students
+                    self.refresh_students_list()
+                    self.on_search_change()  # Update main view
+                    QMessageBox.information(self, "Success", "Students data imported successfully!")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to save students data")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to import students data:\n{e}")
+
+    def setup_backup_tab(self):
+        """Setup the backup tab"""
+        frame = QWidget()
+        self.admin_tabs.addTab(frame, "Backup")
+        layout = QVBoxLayout(frame)
+
+        # Backup location
+        location_layout = QHBoxLayout()
+        location_layout.addWidget(QLabel("Backup Folder:"))
+        self.backup_path_label = QLabel(self.backup_location or "Not set")
+        self.backup_path_label.setStyleSheet("color: white; border: 1px solid #555555; padding: 4px;")
+        location_layout.addWidget(self.backup_path_label)
+
+        change_btn = QPushButton("Change Folder")
+        change_btn.clicked.connect(lambda: self.change_backup_location(self.backup_path_label))
+        location_layout.addWidget(change_btn)
+        layout.addLayout(location_layout)
+
+        # Backup status
+        status_layout = QHBoxLayout()
+        status_layout.addWidget(QLabel("Last Backup:"))
+        self.backup_status_label = QLabel(self.last_backup or "Never")
+        self.backup_status_label.setStyleSheet("color: white; border: 1px solid #555555; padding: 4px;")
+        status_layout.addWidget(self.backup_status_label)
+        layout.addLayout(status_layout)
+
+        # Retention settings
+        retention_layout = QHBoxLayout()
+        retention_layout.addWidget(QLabel("Retention (days):"))
+        self.retention_spin = QSpinBox()
+        self.retention_spin.setMinimum(1)
+        self.retention_spin.setMaximum(365)
+        self.retention_spin.setValue(self.backup_retention_days)
+        self.retention_spin.valueChanged.connect(self.change_retention_days)
+        retention_layout.addWidget(self.retention_spin)
+        layout.addLayout(retention_layout)
+
+        # Interval settings
+        interval_layout = QHBoxLayout()
+        interval_layout.addWidget(QLabel("Interval (hours):"))
+        self.interval_spin = QSpinBox()
+        self.interval_spin.setMinimum(1)
+        self.interval_spin.setMaximum(24)
+        self.interval_spin.setValue(self.backup_interval_hours)
+        self.interval_spin.valueChanged.connect(self.change_backup_interval)
+        interval_layout.addWidget(self.interval_spin)
+        layout.addLayout(interval_layout)
+
+        # Backup controls
+        control_layout = QHBoxLayout()
+
+        backup_now_btn = QPushButton("Backup Now")
+        backup_now_btn.setStyleSheet("background-color: red; color: white; font-weight: bold;")
+        backup_now_btn.clicked.connect(lambda: self.perform_backup(notify=True))
+        control_layout.addWidget(backup_now_btn)
+
+        if self.backup_enabled:
+            toggle_btn = QPushButton("Stop Auto Backup")
+            toggle_btn.clicked.connect(self.stop_backups_pyqt)
+        else:
+            toggle_btn = QPushButton("Start Auto Backup")
+            toggle_btn.clicked.connect(self.start_backups_pyqt)
+        control_layout.addWidget(toggle_btn)
+
+        layout.addLayout(control_layout)
+
+        # Info
+        info_label = QLabel("Auto backup runs hourly when enabled.\nBacks up: attendance.csv, students.json, guests.csv, config.json, assets/")
+        info_label.setStyleSheet("color: white; font-size: 12px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+    def change_retention_days(self, value):
+        """Update backup retention days"""
+        self.backup_retention_days = value
+        self.config["backup_retention_days"] = value
+        save_config(self.config)
+
+    def change_backup_interval(self, value):
+        """Update backup interval hours"""
+        self.backup_interval_hours = value
+        self.config["backup_interval_hours"] = value
+        save_config(self.config)
+
+        # If auto backups are enabled, restart the timer with new interval
+        if self.backup_enabled:
+            try:
+                if hasattr(self, 'backup_timer') and self.backup_timer:
+                    self.backup_timer.stop()
+                self.backup_timer = QTimer(self)
+                self.backup_timer.timeout.connect(self._backup_worker)
+                self.backup_timer.start(self.backup_interval_hours * 60 * 60 * 1000)
+            except Exception:
+                pass
+
+    def start_backups_pyqt(self):
+        """Start auto backups"""
+        if not self.backup_location:
+            QMessageBox.warning(self, "Backup", "Choose a backup folder first")
+            return
+        if self.start_backups():
+            QMessageBox.information(self, "Backup", "Auto backup started (hourly)")
+            # Refresh the tab to update button
+            self.setup_backup_tab()
+
+    def stop_backups_pyqt(self):
+        """Stop auto backups"""
+        self.stop_backups()
+        QMessageBox.information(self, "Backup", "Auto backup stopped")
+        # Refresh the tab to update button
+        self.setup_backup_tab()
+
+    def setup_settings_tab(self):
+        """Setup the settings tab"""
+        frame = QWidget()
+        self.admin_tabs.addTab(frame, "Settings")
+        layout = QVBoxLayout(frame)
+
+        # Admin PIN
+        pin_layout = QHBoxLayout()
+        pin_layout.addWidget(QLabel("Admin PIN:"))
+        change_pin_btn = QPushButton("Change PIN")
+        change_pin_btn.clicked.connect(self.change_admin_pin_pyqt)
+        pin_layout.addWidget(change_pin_btn)
+        pin_layout.addStretch()
+        layout.addLayout(pin_layout)
+
+        # File locations
+        files_group = QGroupBox("File Locations")
+        files_layout = QVBoxLayout(files_group)
+
+        csv_layout = QHBoxLayout()
+        csv_layout.addWidget(QLabel("Attendance CSV:"))
+        self.csv_path_label = QLabel(get_csv_file())
+        self.csv_path_label.setStyleSheet("color: white; border: 1px solid #555555; padding: 4px;")
+        csv_layout.addWidget(self.csv_path_label)
+        change_csv_btn = QPushButton("Change")
+        change_csv_btn.clicked.connect(self.change_csv_location_pyqt)
+        csv_layout.addWidget(change_csv_btn)
+        files_layout.addLayout(csv_layout)
+
+        students_layout = QHBoxLayout()
+        students_layout.addWidget(QLabel("Students JSON:"))
+        self.students_path_label = QLabel(get_students_file())
+        self.students_path_label.setStyleSheet("color: white; border: 1px solid #555555; padding: 4px;")
+        students_layout.addWidget(self.students_path_label)
+        change_students_btn = QPushButton("Change")
+        change_students_btn.clicked.connect(self.change_students_location_pyqt)
+        students_layout.addWidget(change_students_btn)
+        files_layout.addLayout(students_layout)
+
+        guests_layout = QHBoxLayout()
+        guests_layout.addWidget(QLabel("Guests CSV:"))
+        self.guests_path_label = QLabel(get_guests_file())
+        self.guests_path_label.setStyleSheet("color: white; border: 1px solid #555555; padding: 4px;")
+        guests_layout.addWidget(self.guests_path_label)
+        change_guests_btn = QPushButton("Change")
+        change_guests_btn.clicked.connect(self.change_guests_location_pyqt)
+        guests_layout.addWidget(change_guests_btn)
+        files_layout.addLayout(guests_layout)
+
+        layout.addWidget(files_group)
+
+        # Appearance
+        appearance_group = QGroupBox("Appearance")
+        appearance_layout = QVBoxLayout(appearance_group)
+
+        logo_layout = QHBoxLayout()
+        logo_layout.addWidget(QLabel("Logo:"))
+        change_logo_btn = QPushButton("Change Logo")
+        change_logo_btn.clicked.connect(self.change_logo_pyqt)
+        logo_layout.addWidget(change_logo_btn)
+        logo_layout.addStretch()
+        appearance_layout.addLayout(logo_layout)
+
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(QLabel("Header Color:"))
+        change_color_btn = QPushButton("Change Color")
+        change_color_btn.clicked.connect(self.change_header_color_pyqt)
+        color_layout.addWidget(change_color_btn)
+        color_layout.addStretch()
+        appearance_layout.addLayout(color_layout)
+
+        layout.addWidget(appearance_group)
+
+        # Import Data
+        import_group = QGroupBox("Import Data")
+        import_layout = QVBoxLayout(import_group)
+
+        import_attendance_btn = QPushButton("Import Attendance CSV")
+        import_attendance_btn.clicked.connect(self.import_attendance_data_pyqt)
+        import_layout.addWidget(import_attendance_btn)
+
+        layout.addWidget(import_group)
+
+    def change_admin_pin_pyqt(self):
+        """Change admin PIN"""
+        new_pin, ok = QInputDialog.getText(self, "Change PIN", "Enter new admin PIN:", QLineEdit.EchoMode.Password)
+        if ok and new_pin and new_pin.strip():
+            confirm_pin, ok2 = QInputDialog.getText(self, "Confirm PIN", "Confirm new admin PIN:", QLineEdit.EchoMode.Password)
+            if ok2 and new_pin == confirm_pin:
+                self.config["admin_pin"] = new_pin
+                self.admin_pin = new_pin
+                if save_config(self.config):
+                    QMessageBox.information(self, "Success", "Admin PIN changed successfully!")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to save configuration")
+            else:
+                QMessageBox.critical(self, "Error", "PINs do not match!")
+
+    def change_csv_location_pyqt(self):
+        """Change CSV file location"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Choose CSV File Location and Name",
+            get_csv_file(),
+            "CSV files (*.csv);;All files (*.*)"
+        )
+        if not file_path:
+            return
+        
+        try:
+            csv_dir = os.path.dirname(file_path)
+            if csv_dir and not os.path.exists(csv_dir):
+                os.makedirs(csv_dir, exist_ok=True)
+            
+            old_csv = get_csv_file()
+            if os.path.exists(old_csv) and not os.path.exists(file_path):
+                reply = QMessageBox.question(self, "Copy Existing Data?", 
+                                           "Would you like to copy existing attendance data to the new file?",
+                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    shutil.copy2(old_csv, file_path)
+            
+            if not os.path.exists(file_path):
+                with open(file_path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Date", "Name", "Status"])
+            
+            with open(file_path, "a", encoding="utf-8"):
+                pass
+            
+            self.config["csv_file"] = file_path
+            self.csv_file = file_path
+            if save_config(self.config):
+                self.csv_path_label.setText(file_path)
+                self.build_student_buttons()
+                QMessageBox.information(self, "Success", f"CSV file location changed successfully!\n\nNew location:\n{file_path}")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save configuration")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to change CSV location:\n{e}")
+
+    def change_students_location_pyqt(self):
+        """Change students.json location"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Choose Students JSON Location and Name",
+            get_students_file(),
+            "JSON files (*.json);;All files (*.*)"
+        )
+        if not file_path:
+            return
+        try:
+            dirn = os.path.dirname(file_path)
+            if dirn and not os.path.exists(dirn):
+                os.makedirs(dirn, exist_ok=True)
+
+            old = get_students_file()
+            if os.path.exists(old) and not os.path.exists(file_path):
+                reply = QMessageBox.question(self, "Copy Existing Students?", 
+                                           "Copy existing students data to new file?",
+                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    shutil.copy2(old, file_path)
+
+            if not os.path.exists(file_path):
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump([], f)
+
+            self.config["students_file"] = file_path
+            if save_config(self.config):
+                self.students = load_students()
+                self.refresh_students_list()
+                self.build_student_buttons()
+                self.students_path_label.setText(file_path)
+                QMessageBox.information(self, "Success", f"Students file changed to:\n{file_path}")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save configuration")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to change students file:\n{e}")
+
+    def change_guests_location_pyqt(self):
+        """Change guests.csv location"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Choose Guests CSV Location and Name",
+            get_guests_file(),
+            "CSV files (*.csv);;All files (*.*)"
+        )
+        if not file_path:
+            return
+        try:
+            dirn = os.path.dirname(file_path)
+            if dirn and not os.path.exists(dirn):
+                os.makedirs(dirn, exist_ok=True)
+
+            old = get_guests_file()
+            if os.path.exists(old) and not os.path.exists(file_path):
+                reply = QMessageBox.question(self, "Copy Existing Guests?", 
+                                           "Copy existing guests data to new file?",
+                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    shutil.copy2(old, file_path)
+
+            if not os.path.exists(file_path):
+                with open(file_path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Date", "Name", "Email"])
+
+            self.config["guests_file"] = file_path
+            if save_config(self.config):
+                self.guests_path_label.setText(file_path)
+                QMessageBox.information(self, "Success", f"Guests file changed to:\n{file_path}")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save configuration")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to change guests file:\n{e}")
+
+    def change_logo_pyqt(self):
+        """Change logo image"""
+        if not PIL_AVAILABLE:
+            QMessageBox.critical(self, "Error", "Image support not available (PIL/Pillow not installed)")
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Logo Image",
+            "",
+            "Image files (*.png *.jpg *.jpeg *.gif *.bmp);;All files (*.*)"
+        )
+        if file_path:
+            try:
+                if Image:
+                    test_img = Image.open(file_path)
+                    test_img.close()
+                else:
+                    raise Exception("PIL/Pillow not available")
+
+                self.config["logo_file"] = file_path
+                self.logo_file = file_path
+                if save_config(self.config):
+                    self.setup_logo()
+                    QMessageBox.information(self, "Success", "Logo changed successfully!")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to save configuration")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Invalid image file: {e}")
+
+    def change_header_color_pyqt(self):
+        """Change header color"""
+        color = QColorDialog.getColor(QColor(self.header_color), self, "Choose Header Color")
+        if color.isValid():
+            color_hex = color.name()
+            self.config["header_color"] = color_hex
+            self.header_color = color_hex
+            if save_config(self.config):
+                # Update header colors
+                self.header_widget.setStyleSheet(f"background-color: {self.header_color};")
+                self.title_label.setStyleSheet(f"""
+                    color: white;
+                    font-size: 20px;
+                    font-weight: bold;
+                    background-color: {self.header_color};
+                """)
+                self.admin_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {self.header_color};
+                        color: white;
+                        font-size: 14px;
+                        font-weight: bold;
+                        border: 2px solid white;
+                        padding: 8px 16px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #1A1A1A;
+                    }}
+                """)
+                QMessageBox.information(self, "Success", "Header color changed successfully!")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save configuration")
+
+    def import_attendance_data_pyqt(self):
+        """Import attendance data from CSV"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Attendance CSV to Import",
+            "",
+            "CSV files (*.csv);;All files (*.*)"
+        )
+        if not file_path:
+            return
+        try:
+            imported_data = []
+            with open(file_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if "Date" in row and "Name" in row and "Status" in row:
+                        imported_data.append(row)
+                    else:
+                        QMessageBox.warning(self, "Warning", "CSV file format may be incorrect. Expected columns: Date, Name, Status")
+                        return
+            
+            reply = QMessageBox.question(self, "Confirm Import", 
+                                       f"Import {len(imported_data)} attendance records? This will replace current data.",
+                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                global attendance_data
+                attendance_data = imported_data
+                save_attendance_data()
+                self.refresh_attendance_table()
+                QMessageBox.information(self, "Success", "Attendance data imported successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to import attendance data:\n{e}")
+
+    # ---------------- Utilities ----------------
 
     def add_student(self):
         name = simpledialog.askstring("Add Student", "Enter student name:")
@@ -1891,20 +2141,20 @@ Config File: {11}
     # ---------------- Backup functions ----------------
     def change_backup_location(self, path_label=None):
         """Ask user for backup folder and save to config."""
-        file_path = filedialog.askdirectory(title="Choose Backup Folder")
+        file_path = QFileDialog.getExistingDirectory(self, "Choose Backup Folder")
         if not file_path:
             return
         try:
             os.makedirs(file_path, exist_ok=True)
         except Exception as e:
-            messagebox.showerror("Error", "Could not create folder: {0}".format(e))
+            QMessageBox.critical(self, "Error", f"Could not create folder: {e}")
             return
         self.backup_location = file_path
         self.config["backup_location"] = file_path
         save_config(self.config)
         if path_label:
             try:
-                path_label.configure(text="Path: {0}".format(self.backup_location))
+                path_label.setText(f"Path: {self.backup_location}")
             except Exception:
                 pass
 
@@ -1949,34 +2199,54 @@ Config File: {11}
             self.last_backup = datetime.datetime.now().isoformat()
             try:
                 if hasattr(self, 'backup_status_label') and self.backup_status_label:
-                    self.backup_status_label.configure(text=("Last backup: {0}".format(self.last_backup)))
+                    self.backup_status_label.setText(f"Last backup: {self.last_backup}")
             except Exception:
                 pass
 
             if notify:
-                messagebox.showinfo("Backup", "Backup completed: {0}".format(dest))
+                QMessageBox.information(self, "Backup", f"Backup completed: {dest}")
+            self.cleanup_old_backups()
             return True
         except Exception as e:
             if notify:
-                messagebox.showerror("Backup Error", "Backup failed: {0}".format(e))
+                QMessageBox.critical(self, "Backup Error", f"Backup failed: {e}")
             return False
 
+    def cleanup_old_backups(self):
+        """Delete backup folders older than retention days"""
+        if not self.backup_location or not os.path.exists(self.backup_location):
+            return
+        try:
+            import shutil
+            now = datetime.datetime.now()
+            cutoff = now - datetime.timedelta(days=self.backup_retention_days)
+            for item in os.listdir(self.backup_location):
+                item_path = os.path.join(self.backup_location, item)
+                if os.path.isdir(item_path):
+                    try:
+                        # Parse timestamp from folder name YYYYMMDD_HHMMSS
+                        ts_str = item
+                        ts = datetime.datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
+                        if ts < cutoff:
+                            shutil.rmtree(item_path)
+                            print(f"Deleted old backup: {item_path}")
+                    except ValueError:
+                        # Not a timestamp folder, skip
+                        pass
+        except Exception as e:
+            print(f"Backup cleanup error: {e}")
+
     def _backup_worker(self):
-        """Internal worker invoked by Tk after scheduling; performs backup and reschedules."""
+        """Internal worker invoked by QTimer; performs backup."""
         try:
             self.perform_backup(notify=False)
         except Exception:
             pass
-        # schedule next run in one hour
-        try:
-            self.backup_job = self.root.after(60 * 60 * 1000, self._backup_worker)
-        except Exception:
-            self.backup_job = None
 
     def start_backups(self):
         """Start hourly backups (immediate run + schedule)."""
         if not self.backup_location:
-            messagebox.showwarning("Backup", "Choose a backup folder first")
+            QMessageBox.warning(self, "Backup", "Choose a backup folder first")
             return False
         # Save enabled flag
         self.backup_enabled = True
@@ -1988,16 +2258,18 @@ Config File: {11}
         except Exception:
             pass
         try:
-            self.backup_job = self.root.after(60 * 60 * 1000, self._backup_worker)
+            self.backup_timer = QTimer(self)
+            self.backup_timer.timeout.connect(self._backup_worker)
+            self.backup_timer.start(self.backup_interval_hours * 60 * 60 * 1000)  # Configurable hours
         except Exception:
-            self.backup_job = None
+            self.backup_timer = None
         return True
 
     def stop_backups(self):
         """Stop scheduled hourly backups."""
         try:
-            if getattr(self, 'backup_job', None):
-                self.root.after_cancel(self.backup_job)
+            if hasattr(self, 'backup_timer') and self.backup_timer:
+                self.backup_timer.stop()
         except Exception:
             pass
         self.backup_job = None
@@ -2008,29 +2280,28 @@ Config File: {11}
 # ---------------- Main Application ----------------
 def main():
     init_files()
-    root = tk.Tk()
+
+    app = QApplication(sys.argv)
 
     try:
-        root.minsize(800, 600)
         if os.path.exists(ICON_FILE) and PIL_AVAILABLE:
             try:
-                root.iconbitmap(default=ICON_FILE)
+                app.setWindowIcon(QIcon(ICON_FILE))
             except Exception:
                 pass
     except Exception as e:
-        print("Window setup warning: {0}".format(e))
+        print("Icon setup warning:", e)
 
-    app = AttendanceApp(root)
+    window = AttendanceApp()
+    window.show()
+
     try:
-        root.mainloop()
+        sys.exit(app.exec())
     except KeyboardInterrupt:
         print("Application terminated by user")
     except Exception as e:
-        print("Application error: {0}".format(e))
-        try:
-            messagebox.showerror("Application Error", "An error occurred: {0}".format(e))
-        except:
-            print("Could not display error message")
+        print("Application error:", e)
+        QMessageBox.critical(None, "Application Error", f"An error occurred: {e}")
 
 if __name__ == "__main__":
     main()

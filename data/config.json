@@ -5,5 +5,7 @@
   "csv_file": "D:/Python Project/NEW/FRC-Attendence-System/Executable (Current)/data/670test.csv",
   "students_file": "data\\students.json",
   "guests_file": "data\\guests.csv",
-  "backup_location": "D:/Python Project/NEW/Backup Tests"
+  "backup_location": "D:/Python Project/NEW/Backup Tests",
+  "backup_enabled": true,
+  "backup_interval_hours": 1
 }
